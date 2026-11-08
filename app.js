@@ -277,6 +277,7 @@ const SCREENS = {
         <div class="cell"><b data-k="i"></b><span>電流 A</span></div>
       </div>
       <div class="chart" data-k="chart"></div>
+      ${checksBox()}
       <div class="bottom">${stopBtn()}</div>`;
   },
   fail() {
@@ -297,10 +298,28 @@ const SCREENS = {
         <div class="cell"><b data-k="elapsed"></b><span>慣らした時間</span></div>
         <div class="cell"><b data-k="checks"></b><span>確認</span></div>
       </div>
+      ${checksBox()}
       <p class="note">詳しい結果は本体の画面を見てください。</p>
       <div class="bottom"><button class="btn go act" data-cmd="close">閉じる</button></div>`;
   },
 };
+
+// 3.0V の確認の回転数を全部並べる枠(慣らし中と結果の一番下)
+function checksBox() {
+  return `<div class="checks">
+      <p class="checksHead">3.0V の確認の回転数</p>
+      <div data-k="chkList"></div>
+    </div>`;
+}
+
+function checksRows(rpm) {
+  if (!rpm.length) return '<p class="note">まだ確認していません</p>';
+  return rpm.map((r, k) => {
+    const d = k > 0 ? r - rpm[k - 1] : null;
+    const diff = d === null ? '' : `<span class="${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '+' : '−'}${num(Math.abs(d))}</span>`;
+    return `<div class="chkRow"><span>${k + 1} 回目</span><b>${num(r)}</b>${diff}</div>`;
+  }).join('');
+}
 
 function crsSetupHtml() {
   return `<span class="state">慣らしの設定</span>
@@ -454,6 +473,11 @@ function render() {
   if (scr === 'run') {
     view.querySelector('[data-k="chart"]').innerHTML = chartSvg(st.history.rpm);
   }
+  const chk = view.querySelector('[data-k="chkList"]');
+  if (chk) {
+    const html = checksRows(st.checks.rpm);
+    if (chk.dataset.html !== html) { chk.dataset.html = html; chk.innerHTML = html; }   // 0.25 秒ごとに作り直さない
+  }
   if (scr === 'motMenu') {
     const c = st.config;
     setK('crsSummary', crsSummary(c));
@@ -553,6 +577,8 @@ const demo = {
   },
   show(phase) {
     this.phase = phase;
+    const chk = phase === 10 ? [34120, 35020] : phase === 12 ? [34120, 35020, 35680, 36210] : [];
+    store.apply(JSON.stringify({ t: 'k', course: 1, rpm: chk }));
     store.apply(this.status(phase));
   },
 };

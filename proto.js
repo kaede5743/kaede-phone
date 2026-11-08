@@ -53,6 +53,7 @@ export function createStore() {
     status: null,
     config: null,
     history: { course: null, rpm: [], i: [] },
+    checks: { course: null, rpm: [] },   // 3.0V の確認の回転数(測れた回だけ)
     versionOk: true,
   };
   const store = {
@@ -77,6 +78,10 @@ export function createStore() {
           break;
         case 'h':
           applyHistory(state.history, m);
+          break;
+        case 'k':   // 本体は変わるたびに一覧を全部送る
+          if (!Array.isArray(m.rpm) || !m.rpm.every((v) => typeof v === 'number')) return false;
+          state.checks = { course: m.course, rpm: m.rpm };
           break;
         case 'r':
           if (store.onReply) store.onReply(m.id, m.res);
