@@ -249,6 +249,10 @@ const SCREENS = {
   motBusy() {
     return `<span class="state" data-k="label"></span>
       <p class="say">本体で操作中です</p>
+      <div data-k="liveBox" hidden>
+        <div class="big"><span data-k="live"></span><small>rpm</small></div>
+        <p class="note">今の回転数(本体の画面と同じ)</p>
+      </div>
       <p class="note" data-k="busyNote"></p>
       <div class="bottom" data-k="busyStop">${stopBtn('長押しで停止')}</div>`;
   },
@@ -262,12 +266,14 @@ const SCREENS = {
   },
   run() {
     return `<span class="state run" data-k="label"></span>
-      <div class="big"><span data-k="rpm"></span><small>rpm</small></div>
-      <p class="note">慣らし電圧での 1 分平均。目標とは 3.0V の確認で比べます。</p>
+      <div class="big"><span data-k="live"></span><small>rpm</small></div>
+      <p class="note">今の回転数(本体の画面と同じ)。目標とは 3.0V の確認で比べます。</p>
       <div class="grid">
+        <div class="cell"><b data-k="rpm"></b><span>1 分平均 rpm</span></div>
         <div class="cell"><b data-k="target"></b><span>目標 rpm(3.0V)</span></div>
         <div class="cell"><b data-k="checks"></b><span>確認</span></div>
         <div class="cell"><b data-k="elapsed"></b><span>経過 / 最大</span></div>
+        <div class="cell"><b data-k="mv"></b><span>電圧 V</span></div>
         <div class="cell"><b data-k="i"></b><span>電流 A</span></div>
       </div>
       <div class="chart" data-k="chart"></div>
@@ -437,7 +443,10 @@ function render() {
     box.hidden = s.phase !== PHASE.BAT_COUNTDOWN;
     setK('countdown', `あと ${s.detect_s} 秒で充電を始めます`);
   }
+  setK('live', num(s.live));
+  setK('mv', num(s.v, 2));
   if (scr === 'motBusy') {
+    view.querySelector('[data-k="liveBox"]').hidden = !(typeof s.live === 'number');
     const running = s.phase === PHASE.MOT_RUN;
     view.querySelector('[data-k="busyStop"]').hidden = !running;
     setK('busyNote', running ? '止めることだけできます。' : '本体の操作が終わるまで、スマホからは操作できません。');
@@ -530,14 +539,14 @@ view.addEventListener('change', (e) => {
 const demo = {
   phase: 0,
   status(phase) {
-    const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, target: 0, elapsed_s: 0, max_s: 0, rpm: null,
+    const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, target: 0, elapsed_s: 0, max_s: 0, rpm: null, live: null,
       checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12 };
     const set = {
       0: {}, 1: { label: 'READY', v: 2.41 }, 2: { label: 'READY', v: 2.41, detect_s: 3 },
       3: { label: 'CHARGE', v: 2.63, i: 1.24, mah: 312, elapsed_s: 754 }, 4: { label: 'RESULT', mah: 690, elapsed_s: 1830 },
-      5: { label: 'ERROR', error: 'OVER TEMP' }, 6: { label: 'ハイパーダッシュ3' }, 7: { label: '選別' },
-      8: { label: '手動運転', rpm: 21000 }, 9: { label: 'コース1/3 診断(前)', prompt: 'セレクターを外してください' },
-      10: { label: '慣らし', rpm: 15980, target: 36000, elapsed_s: 4321, max_s: 21600, checks: 1, checks_max: 6, i: 0.63 },
+      5: { label: 'ERROR', error: 'OVER TEMP' }, 6: { label: 'ハイパーダッシュ3' }, 7: { label: '選別', live: 30480 },
+      8: { label: '手動運転', rpm: 21000, live: 21030 }, 9: { label: 'コース1/3 診断(前)', prompt: 'セレクターを外してください' },
+      10: { label: '慣らし', rpm: 15980, live: 16020, target: 36000, elapsed_s: 4321, max_s: 21600, checks: 1, checks_max: 6, v: 1.5, i: 0.63 },
       11: { label: '測れませんでした' }, 12: { label: '結果', rpm: 36210, target: 36000, elapsed_s: 14400, max_s: 21600, checks: 4, checks_max: 6 },
     };
     return JSON.stringify({ ...base, ...set[phase] });

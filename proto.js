@@ -68,6 +68,10 @@ export function createStore() {
           state.status = m;
           state.stale = !state.connected;
           break;
+        case 'l':   // 今の回転数だけ。状態が届く前は捨てる
+          if (!state.status) return false;
+          state.status.live = m.live;
+          break;
         case 'c':
           state.config = m;
           break;
