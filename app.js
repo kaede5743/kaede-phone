@@ -195,7 +195,7 @@ const SCREENS = {
     const chips = PRESETS.map((v, k) => `<button class="chip act" data-cmd="bat.preset" data-arg="${k}" data-preset="${k}">${v.toFixed(2)}</button>`).join('');
     return `<span class="state" data-k="label"></span>
       <div class="big"><span data-k="v"></span><small>V</small></div>
-      <p class="note">充電の目標電圧</p>
+      <p class="note">電池の電圧(目標は下のボタンで選びます)</p>
       <div class="chips">${chips}</div>
       <div data-k="countdownBox" hidden>
         <p class="say" data-k="countdown"></p>
@@ -417,7 +417,7 @@ function render() {
 
   if (!s) return;
   setK('label', s.label || '');
-  setK('v', num(s.v, 2));
+  setK('v', num(s.v, 3));
   setK('i', num(s.i, 2));
   setK('temp', num(s.temp, 1));
   setK('mah', num(s.mah));
