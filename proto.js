@@ -8,13 +8,25 @@ export const PHASE = Object.freeze({
   SELECTOR: 0, BAT_READY: 1, BAT_COUNTDOWN: 2, BAT_RUN: 3, BAT_RESULT: 4, BAT_ERROR: 5,
   MOT_IDLE: 6, MOT_BUSY: 7, MOT_RUN: 8, CRS_PROMPT: 9, CRS_RUN: 10, CRS_FAIL: 11, CRS_RESULT: 12,
   MAN_IDLE: 13, MAN_RUN: 14, SEL_INPUT: 15, SEL_PROMPT: 16, SEL_RUN: 17, SEL_FAIL: 18, SEL_RESULT: 19, SEL_LIST: 20,
+  SPD: 21, SPD_BUSY: 22,
 });
 
 const SCREEN_OF_PHASE = [
   'selector', 'batSetup', 'batSetup', 'batRun', 'batResult', 'batError',
   'motMenu', 'motBusy', 'motBusy', 'prompt', 'run', 'fail', 'result',
   'manual', 'manual', 'selInput', 'selPrompt', 'selRun', 'selFail', 'selResult', 'selList',
+  'speed', 'speedBusy',
 ];
+
+// スピードマネージャー(speed_math.h と同じ値)。ギヤ比は 10 倍、タイヤ径は 0.1mm 単位
+export const GEARS_X10 = Object.freeze([35, 37, 40, 42, 50]);
+export const TIRE_X10_MIN = 220, TIRE_X10_MAX = 310;
+
+// 速度 [km/h] = モーター rpm ÷ ギヤ比 × タイヤ径[mm] × π × 60 ÷ 1,000,000。測れていなければ null
+export function speedKmh(rpm, gearX10, tireX10) {
+  if (!(rpm > 0) || !(gearX10 > 0)) return null;
+  return rpm / (gearX10 / 10) * (tireX10 / 10) * Math.PI * 60 / 1e6;
+}
 
 export const REJECT_TEXT = Object.freeze({
   bad: '命令が読めませんでした',

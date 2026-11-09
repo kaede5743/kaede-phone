@@ -1,5 +1,5 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
-import { LineBuffer, createStore, screenFor, buildCommand, REJECT_TEXT, PHASE } from './proto.js';
+import { LineBuffer, createStore, screenFor, buildCommand, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
 import { esc, num, unitListHtml, unitDetailHtml, unitResultHtml } from './select.js';
 
 const SVC = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b01';
@@ -189,8 +189,9 @@ const SCREENS = {
   },
   selector() {
     return `<span class="state">メニュー</span>
-      <button class="btn go appbig act" data-cmd="app" data-arg="1">バッテリー</button>
-      <button class="btn go appbig act" data-cmd="app" data-arg="2">モーター</button>`;
+      <button class="btn go appbig act" data-cmd="app" data-arg="1">Battery Manager</button>
+      <button class="btn go appbig act" data-cmd="app" data-arg="2">Motor Manager</button>
+      <button class="btn go appbig act" data-cmd="app" data-arg="3">Speed Manager</button>`;
   },
   batSetup() {
     const chips = PRESETS.map((v, k) => `<button class="chip act" data-cmd="bat.preset" data-arg="${k}" data-preset="${k}">${v.toFixed(2)}</button>`).join('');
@@ -314,6 +315,34 @@ const SCREENS = {
       ${checksBox()}
       <p class="note">詳しい結果は本体の画面を見てください。</p>
       <div class="bottom"><button class="btn go act" data-cmd="close">閉じる</button></div>`;
+  },
+  // ===== スピードマネージャー =====
+  speed() {
+    if (local === 'motors') return motorsHtml('spd.motor');
+    const chips = GEARS_X10.map((g, k) => `<button class="chip act" data-cmd="spd.gear" data-arg="${k}" data-gear="${k}">${(g / 10).toFixed(1)}</button>`).join('');
+    return `<span class="state run" data-k="label"></span>
+      <div class="big"><span data-k="kmh"></span><small>km/h</small></div>
+      <p class="note">モーター <b data-k="live"></b> rpm(タイヤを空転させた音から)</p>
+      <div class="grid">
+        <div class="cell"><b class="up" data-k="kmhMax"></b><span>最高 km/h</span></div>
+        <div class="cell"><b class="up" data-k="smax"></b><span>最高 rpm</span></div>
+      </div>
+      <div class="row"><span>タイヤ径</span><span class="tgt">
+        <input class="act" inputmode="decimal" data-f="spdTire" aria-label="タイヤ径"> mm
+        <button class="chip act" data-act="spdTire">変える</button></span></div>
+      <p class="note">ギヤ比(:1)</p>
+      <div class="chips five">${chips}</div>
+      <button class="row act" data-act="motors"><span>機種</span><span data-k="spdMotor"></span></button>
+      <div class="bottom">
+        <button class="btn sub act" data-act="spdClr">最高値を消す</button>
+        <button class="btn sub act" data-cmd="app" data-arg="0">メニューへ</button>
+      </div>`;
+  },
+  speedBusy() {
+    return `<span class="state" data-k="label"></span>
+      <p class="say">本体で設定を直しています</p>
+      <p class="note" data-k="spdBand"></p>
+      <p class="note">本体の「決定」か「やめる」で計測の画面に戻ると、スマホからも操作できます。</p>`;
   },
   // ===== 段階2 =====
   manual() {
@@ -472,9 +501,9 @@ function crsSetupHtml() {
     </div>`;
 }
 
-function motorsHtml() {
+function motorsHtml(cmd = 'mot.type') {
   const list = st.config?.motors ?? [];
-  const rows = list.map((name, k) => `<button class="row act" data-cmd="mot.type" data-arg="${k}" data-motor="${k}"><span>${esc(name)}</span><span></span></button>`).join('');
+  const rows = list.map((name, k) => `<button class="row act" data-cmd="${cmd}" data-arg="${k}" data-motor="${k}"><span>${esc(name)}</span><span></span></button>`).join('');
   return `<span class="state">機種</span>${rows || '<p class="note">機種の一覧を待っています…</p>'}
     <div class="bottom"><button class="btn sub" data-act="back">戻る</button></div>`;
 }
@@ -603,6 +632,7 @@ function render() {
     if (chk.dataset.html !== html) { chk.dataset.html = html; chk.innerHTML = html; }   // 0.25 秒ごとに作り直さない
   }
   renderStage2(scr, s);
+  if (scr === 'speed' || scr === 'speedBusy') renderSpeed(scr, s);
   if (scr === 'motMenu') {
     const c = st.config;
     setK('crsSummary', crsSummary(c));
@@ -616,6 +646,29 @@ function render() {
   }
 }
 store.onChange = render;
+
+// スピードマネージャーの値。速度はページで計算する(本体の画面と同じ式)
+function speedBand(s) {
+  const motor = st.config?.motors?.[s.smot] ?? '';
+  return `${num(s.tire / 10, 1)}mm ・ ${num(s.gear / 10, 1)}:1 ・ ${motor}`;
+}
+function renderSpeed(scr, s) {
+  setK('spdBand', speedBand(s));
+  if (scr !== 'speed') return;
+  if (local === 'motors') {
+    for (const el of view.querySelectorAll('[data-motor]')) el.lastElementChild.textContent = +el.dataset.motor === s.smot ? '使用中' : '';
+    return;
+  }
+  const kmh = speedKmh(s.live, s.gear, s.tire);
+  const kmhMax = speedKmh(s.smax, s.gear, s.tire);
+  setK('kmh', kmh === null ? '---' : num(kmh, 1));
+  setK('live', typeof s.live === 'number' ? num(s.live) : '---');
+  setK('kmhMax', kmhMax === null ? '---' : num(kmhMax, 1));
+  setK('smax', typeof s.smax === 'number' ? num(s.smax) : '---');
+  setK('spdMotor', st.config?.motors?.[s.smot] ?? '');
+  setField('spdTire', (s.tire / 10).toFixed(1));
+  for (const el of view.querySelectorAll('[data-gear]')) el.classList.toggle('on', +el.dataset.gear === s.gi);
+}
 
 function bindLongPresses(root) {
   for (const el of root.querySelectorAll('[data-long]')) bindLongPress(el, () => send(el.dataset.long));
@@ -676,7 +729,7 @@ view.addEventListener('click', async (e) => {
   if (el.dataset.unit) { local = `d:${el.dataset.unit}`; render(); return; }
   if (el.dataset.cmd) {
     send(el.dataset.cmd, el.dataset.arg === undefined ? undefined : Number(el.dataset.arg));
-    if (el.dataset.cmd === 'mot.type') { local = null; render(); }
+    if (el.dataset.cmd === 'mot.type' || el.dataset.cmd === 'spd.motor') { local = null; render(); }
     return;
   }
   const s = st.status;
@@ -696,6 +749,15 @@ view.addEventListener('click', async (e) => {
       send('man.v', v);
       break;
     }
+    case 'spdTire': {
+      const v = Math.round(parseFloat(view.querySelector('[data-f="spdTire"]').value) * 10);
+      if (!(v >= TIRE_X10_MIN && v <= TIRE_X10_MAX)) { toast('タイヤ径は 22.0〜31.0mm で入れてください'); return; }
+      send('spd.tire', v);
+      break;
+    }
+    case 'spdClr':
+      if (await ask('最高値を消しますか?', '消す')) send('spd.clr');
+      break;
     case 'manStart':
       if (await ask(`${num((s?.mset ?? 0) / 10, 1)}V でモーターを回します。`, '回す')) send('man.start');
       break;
@@ -741,7 +803,7 @@ view.addEventListener('change', (e) => {
   const el = e.target;
   const f = el.dataset.f;
   if (!f) return;
-  if (f === 'selNo' || f === 'manV') { render(); return; }   // 送るのはボタンを押したとき
+  if (f === 'selNo' || f === 'manV' || f === 'spdTire') { render(); return; }   // 送るのはボタンを押したとき
   const int = (v) => parseInt(v, 10);
   switch (f) {
     case 'mode': case 'check': case 'periodic': case 'pre': case 'post':
@@ -775,10 +837,12 @@ view.addEventListener('change', (e) => {
 // ===== 見本(?demo=1): Bluetooth を使わずに全部の画面を出す =====
 const demo = {
   phase: 0,
+  spd: { tire: 235, gi: 0, smot: 2, smax: 36210 },
   status(phase) {
     const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, target: 0, elapsed_s: 0, max_s: 0, rpm: null, live: null,
       checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12,
-      run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0 };
+      run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0,
+      tire: demo.spd.tire, gear: GEARS_X10[demo.spd.gi], gi: demo.spd.gi, smot: demo.spd.smot, smax: demo.spd.smax };
     const set = {
       0: {}, 1: { label: 'READY', v: 2.41 }, 2: { label: 'READY', v: 2.41, detect_s: 3 },
       3: { label: 'CHARGE', v: 2.63, i: 1.24, mah: 312, elapsed_s: 754 }, 4: { label: 'RESULT', mah: 690, elapsed_s: 1830 },
@@ -793,6 +857,8 @@ const demo = {
       21: { phase: 14, label: '手動運転 一時停止', run: 3, live: 32100, v: 0, elapsed_s: 240 },
       22: { phase: 10, label: '冷却中', skip: 1, target: 36000 },
       23: { phase: 3, label: 'DONE', v: 2.80, i: 0.01, mah: 690, elapsed_s: 1830, bdone: 1 },
+      24: { phase: 21, label: 'スピード', live: 34870 }, 25: { phase: 22, label: '本体で設定中' },
+      26: { phase: 21, label: 'スピード', live: null },
     };
     return JSON.stringify({ ...base, ...set[phase] });
   },
@@ -817,10 +883,15 @@ function demoCommand(id, op, arg) {
   setTimeout(() => {
     store.apply(JSON.stringify({ t: 'r', id, res: 'ok' }));
     const p = demo.phase;
-    const go = { app: [0, 1, 6][arg], 'bat.cancel': 1, stop: p >= 13 ? 6 : p >= 9 ? 12 : p >= 6 ? 6 : 1, 'err.clear': 1,
+    if (op === 'spd.tire') demo.spd.tire = arg;
+    if (op === 'spd.gear') demo.spd.gi = arg;
+    if (op === 'spd.motor') { demo.spd.smot = arg; demo.spd.smax = null; }
+    if (op === 'spd.clr') demo.spd.smax = null;
+    const go = { app: [0, 1, 6, 24][arg], 'bat.cancel': 1, stop: p >= 13 ? 6 : p >= 9 ? 12 : p >= 6 ? 6 : 1, 'err.clear': 1,
       close: p === 4 ? 1 : 6, next: p === 16 ? 17 : 10, retry: p === 18 ? 16 : 9, 'crs.start': 9,
       'man.enter': 13, 'man.start': 14, 'man.pause': 21, 'mot.home': 6, 'sel.enter': 15, 'sel.start': 16, 'sel.startbi': 16,
-      'sel.redo': 16, 'sel.input': 15, skip: 10, 'bat.finish': 3, 'bat.recheck': 3 }[op];
+      'sel.redo': 16, 'sel.input': 15, skip: 10, 'bat.finish': 3, 'bat.recheck': 3,
+      'spd.tire': p, 'spd.gear': p, 'spd.motor': p, 'spd.clr': p }[op];
     if (go !== undefined) demo.show(go);
     if (op === 'bat.preset') store.apply(demo.status(demo.phase).replace('"preset":2.8', `"preset":${PRESETS[arg]}`));
   }, 150);
@@ -838,7 +909,8 @@ function startDemo() {
   const bar = $('demo');
   bar.hidden = false;
   const names = ['選択', '電池待機', '数え中', '充電中', '充電結果', 'エラー', 'モーター', '本体操作', '本体運転', '案内', '慣らし中', '失敗', '結果',
-    '手動', '手動回転', '選別番号', '選別案内', '選別中', '選別失敗', '選別結果', '選別一覧', '手動一時停止', '冷却中', '充電完了待ち'];
+    '手動', '手動回転', '選別番号', '選別案内', '選別中', '選別失敗', '選別結果', '選別一覧', '手動一時停止', '冷却中', '充電完了待ち',
+    'スピード', 'スピード設定中', 'スピード測れず'];
   bar.innerHTML = names.map((n, k) => `<button data-demo="${k}">${n}</button>`).join('') + '<button data-demo="cut">切断</button>';
   bar.addEventListener('click', (e) => {
     const k = e.target.dataset.demo;

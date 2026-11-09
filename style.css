@@ -70,7 +70,7 @@ button.row { cursor: pointer; }
 .row input[type=number], .row input[inputmode] { width: 7.5em; }
 .row .hm { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .row .hm input { width: 4.2em; }
-.row .tgt { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.row .tgt { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 
 .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .chip {
@@ -115,3 +115,7 @@ dialog p { font-size: 17px; font-weight: 700; margin: 0 0 14px; white-space: pre
 .unitRow.mark { outline: 2px solid var(--go); outline-offset: -2px; }
 [data-k="unitList"] { display: flex; flex-direction: column; gap: 6px; }
 .cell b.up, .cell b.warn, .cell b.down { font-size: 15px; }
+
+/* スピードマネージャー: ギヤ比 5 つ */
+.chips.five { grid-template-columns: repeat(5, 1fr); }
+.note b { color: var(--ink); font-variant-numeric: tabular-nums; }
