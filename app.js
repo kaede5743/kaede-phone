@@ -329,7 +329,7 @@ const SCREENS = {
       </div>
       <div class="row"><span>タイヤ径</span><span class="tgt">
         <input class="act" inputmode="decimal" data-f="spdTire" aria-label="タイヤ径"> mm
-        <button class="chip act" data-act="spdTire">変える</button></span></div>
+        <button class="chip act" data-act="spdTire">変更</button></span></div>
       <p class="note">ギヤ比(:1)</p>
       <div class="chips five">${chips}</div>
       <button class="row act" data-act="motors"><span>機種</span><span data-k="spdMotor"></span></button>
@@ -357,7 +357,7 @@ const SCREENS = {
       </div>
       <div class="row"><span>電圧</span><span class="tgt">
         <input class="act" inputmode="decimal" data-f="manV" aria-label="手動運転の電圧"> V
-        <button class="chip act" data-act="manV">変える</button>
+        <button class="chip act" data-act="manV">変更</button>
       </span></div>
       <p class="note">0.5〜3.0V。回っている途中でも変えられます</p>
       <div class="bottom" data-k="manBtns"></div>`;
