@@ -7,11 +7,13 @@ export const PROTO_VERSION = 1;
 export const PHASE = Object.freeze({
   SELECTOR: 0, BAT_READY: 1, BAT_COUNTDOWN: 2, BAT_RUN: 3, BAT_RESULT: 4, BAT_ERROR: 5,
   MOT_IDLE: 6, MOT_BUSY: 7, MOT_RUN: 8, CRS_PROMPT: 9, CRS_RUN: 10, CRS_FAIL: 11, CRS_RESULT: 12,
+  MAN_IDLE: 13, MAN_RUN: 14, SEL_INPUT: 15, SEL_PROMPT: 16, SEL_RUN: 17, SEL_FAIL: 18, SEL_RESULT: 19, SEL_LIST: 20,
 });
 
 const SCREEN_OF_PHASE = [
   'selector', 'batSetup', 'batSetup', 'batRun', 'batResult', 'batError',
   'motMenu', 'motBusy', 'motBusy', 'prompt', 'run', 'fail', 'result',
+  'manual', 'manual', 'selInput', 'selPrompt', 'selRun', 'selFail', 'selResult', 'selList',
 ];
 
 export const REJECT_TEXT = Object.freeze({
@@ -54,6 +56,7 @@ export function createStore() {
     config: null,
     history: { course: null, rpm: [], i: [] },
     checks: { course: null, rpm: [] },   // 3.0V の確認の回転数(測れた回だけ)
+    units: { n: 0, rows: [], complete: false },   // 選別の個体の一覧(本体が推定回転数の速い順に送る)
     versionOk: true,
   };
   const store = {
@@ -78,6 +81,9 @@ export function createStore() {
           break;
         case 'h':
           applyHistory(state.history, m);
+          break;
+        case 'u':
+          if (!applyUnit(state.units, m)) return false;
           break;
         case 'k':   // 本体は変わるたびに一覧を全部送る
           if (!Array.isArray(m.rpm) || !m.rpm.every((v) => typeof v === 'number')) return false;
@@ -107,6 +113,18 @@ export function createStore() {
     },
   };
   return store;
+}
+
+// 個体の一覧の 1 行。i=0 で作り直し、飛んだ行は入れない(本体は印が変わると先頭から送り直す)
+function applyUnit(u, m) {
+  if (!Number.isInteger(m.i) || !Number.isInteger(m.n) || m.i < 0 || m.n < 0) return false;
+  if (m.i === 0) { u.n = m.n; u.rows = []; u.complete = m.n === 0; }
+  if (m.n === 0) return true;
+  if (m.i !== u.rows.length || m.n !== u.n) return true;   // 飛んだ・別の一覧の行は捨てる
+  const { t, i, n, ...row } = m;
+  u.rows.push(row);
+  u.complete = u.rows.length === u.n;
+  return true;
 }
 
 function applyHistory(h, m) {

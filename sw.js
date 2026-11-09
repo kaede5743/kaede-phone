@@ -1,6 +1,6 @@
 // 同じ場所のファイルを入れておき、電波がなくても開けるようにする。ページを直したら CACHE の番号を上げる
-const CACHE = 'kaede-phone-v4';
-const FILES = ['./', 'index.html', 'app.js', 'proto.js', 'style.css', 'manifest.json', 'icon.svg'];
+const CACHE = 'kaede-phone-v5';
+const FILES = ['./', 'index.html', 'app.js', 'proto.js', 'select.js', 'style.css', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));

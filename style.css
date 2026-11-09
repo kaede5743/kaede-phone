@@ -103,3 +103,15 @@ dialog p { font-size: 17px; font-weight: 700; margin: 0 0 14px; white-space: pre
 
 .demo { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 10px; }
 .demo button { background: #2c2d33; border: 0; border-radius: 7px; padding: 6px 9px; font-size: 12px; min-height: 32px; }
+
+/* 段階2: 選別の一覧・結果、色の段 */
+.up { color: var(--ok); }
+.warn { color: var(--warn); }
+.down { color: #ff9a8f; }
+.chips.two { grid-template-columns: 1fr 1fr; }
+.chip:disabled { opacity: .35; }
+.unitRow { min-height: 44px; }
+.unitRow small { color: var(--sub); font-size: 12px; font-weight: 600; margin-left: 4px; }
+.unitRow.mark { outline: 2px solid var(--go); outline-offset: -2px; }
+[data-k="unitList"] { display: flex; flex-direction: column; gap: 6px; }
+.cell b.up, .cell b.warn, .cell b.down { font-size: 15px; }

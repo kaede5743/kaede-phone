@@ -1,5 +1,6 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
 import { LineBuffer, createStore, screenFor, buildCommand, REJECT_TEXT, PHASE } from './proto.js';
+import { esc, num, unitListHtml, unitDetailHtml, unitResultHtml } from './select.js';
 
 const SVC = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b01';
 const RX  = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b02';   // ページ → 本体
@@ -142,8 +143,6 @@ function ask(text, yes = '進める') {
   return new Promise((resolve) => d.addEventListener('close', () => resolve(d.returnValue === 'yes'), { once: true }));
 }
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const num = (v, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? v.toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—');
 function mmss(s) {
   if (!Number.isFinite(s) || s <= 0) return '0:00';
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = Math.floor(s % 60);
@@ -174,7 +173,9 @@ const stopBtn = (label = '長押しで中止') => `<button class="btn stop act" 
 
 // ===== 画面 =====
 // 画面ごとに骨組みを 1 回だけ作り、値は data-k の要素だけ書き換える(押している途中のボタンを作り直さない)
-let local = null;              // モーターの待機中にページの中だけで開く画面: 'crs' | 'motors'
+let local = null;              // ページの中だけで開く画面: 'crs' | 'motors' | 'list' | 'd:<番号>'(本体は動かさない)
+let localFor = '';             // local を開いた画面。画面が変わったら閉じる
+let selBi = false;             // 選別の番号入力で「慣らし済」を選んだ
 let shown = '';
 
 const SCREENS = {
@@ -201,6 +202,8 @@ const SCREENS = {
         <p class="say" data-k="countdown"></p>
         <button class="btn sub act" data-cmd="bat.cancel">キャンセル</button>
       </div>
+      <button class="row act" data-act="buz"><span>ブザー</span><span data-k="buz"></span></button>
+      <button class="row act" data-act="race"><span>レース用(早く完了)</span><span data-k="race"></span></button>
       <div class="bottom pair">
         <button class="btn sub act" data-cmd="app" data-arg="0">メニューへ</button>
         <button class="btn sub act" data-cmd="app" data-arg="2">モーターへ</button>
@@ -216,7 +219,13 @@ const SCREENS = {
         <div class="cell"><b data-k="temp"></b><span>温度 ℃</span></div>
       </div>
       <p class="note">目標 <span data-k="preset"></span> V</p>
-      <div class="bottom">${stopBtn('長押しで停止')}</div>`;
+      <div class="bottom">
+        <div class="pair" data-k="bdoneBox" hidden>
+          <button class="btn sub act" data-cmd="bat.finish">直前仕上げ</button>
+          <button class="btn sub act" data-cmd="bat.recheck">再確認</button>
+        </div>
+        ${stopBtn('長押しで停止')}
+      </div>`;
   },
   batResult() {
     return `<span class="state">結果</span>
@@ -240,7 +249,8 @@ const SCREENS = {
       <p class="h" data-k="label"></p>
       <button class="row act" data-act="crs"><span>慣らし</span><span data-k="crsSummary"></span></button>
       <button class="row act" data-act="motors"><span>機種</span><span data-k="motorName"></span></button>
-      <div class="row dim"><span>選別・手動運転・プログラム</span><span>本体で操作</span></div>
+      <button class="row act" data-cmd="sel.enter"><span>選別</span><span>›</span></button>
+      <button class="row act" data-cmd="man.enter"><span>手動運転</span><span>›</span></button>
       <div class="bottom pair">
         <button class="btn sub act" data-cmd="app" data-arg="0">メニューへ</button>
         <button class="btn sub act" data-cmd="app" data-arg="1">バッテリーへ</button>
@@ -278,7 +288,10 @@ const SCREENS = {
       </div>
       <div class="chart" data-k="chart"></div>
       ${checksBox()}
-      <div class="bottom">${stopBtn()}</div>`;
+      <div class="bottom">
+        <button class="btn sub act" data-act="skip" data-k="skipBtn" hidden></button>
+        ${stopBtn()}
+      </div>`;
   },
   fail() {
     return `<span class="state err" data-k="label"></span>
@@ -302,7 +315,118 @@ const SCREENS = {
       <p class="note">詳しい結果は本体の画面を見てください。</p>
       <div class="bottom"><button class="btn go act" data-cmd="close">閉じる</button></div>`;
   },
+  // ===== 段階2 =====
+  manual() {
+    return `<span class="state" data-k="label"></span>
+      <div class="big"><span data-k="live"></span><small>rpm</small></div>
+      <p class="note" data-k="manNote"></p>
+      <div class="grid">
+        <div class="cell"><b data-k="mv"></b><span>電圧 V(測った値)</span></div>
+        <div class="cell"><b data-k="i"></b><span>電流 A</span></div>
+        <div class="cell"><b data-k="elapsed"></b><span>経過</span></div>
+        <div class="cell"><b data-k="kv"></b><span>rpm / V</span></div>
+      </div>
+      <div class="row"><span>電圧</span><span class="tgt">
+        <input class="act" inputmode="decimal" data-f="manV" aria-label="手動運転の電圧"> V
+        <button class="chip act" data-act="manV">変える</button>
+      </span></div>
+      <p class="note">0.5〜3.0V。回っている途中でも変えられます</p>
+      <div class="bottom" data-k="manBtns"></div>`;
+  },
+  selInput() {
+    if (local) return unitsLocalHtml();
+    return `<span class="state" data-k="label"></span>
+      <label class="row"><span>番号</span><input class="act" inputmode="numeric" data-f="selNo" aria-label="個体の番号"></label>
+      <p class="note" data-k="selNoNote"></p>
+      <div class="chips two">
+        <button class="chip act" data-act="selBi" data-bi="0">新品</button>
+        <button class="chip act" data-act="selBi" data-bi="1">慣らし済</button>
+      </div>
+      <button class="btn sub act" data-act="selRenew" data-k="selRenew" hidden>番号の付け替え</button>
+      <button class="btn sub act" data-act="list">一覧(推定回転数の速い順)</button>
+      <div class="bottom">
+        <button class="btn go act" data-act="selStart">測定開始(モーターが回ります)</button>
+        <button class="btn sub act" data-cmd="mot.home">戻る</button>
+      </div>`;
+  },
+  selPrompt() {
+    return `<span class="state run" data-k="label"></span>
+      <p class="say" data-k="prompt"></p>
+      <div class="big"><span data-k="live"></span><small>rpm</small></div>
+      <p class="note">今の回転数</p>
+      <div class="bottom">
+        <button class="btn go act" data-act="next">次へ(モーターが回ります)</button>
+        ${stopBtn()}
+      </div>`;
+  },
+  selRun() {
+    return `<span class="state run" data-k="label"></span>
+      <p class="say">測っています</p>
+      <div class="big"><span data-k="live"></span><small>rpm</small></div>
+      <p class="note">今の回転数</p>
+      <div class="bottom">${stopBtn()}</div>`;
+  },
+  selFail() {
+    return `<span class="state err" data-k="label"></span>
+      <p class="say">回転数を測れませんでした</p>
+      <p class="note">本体の画面で理由を確かめてから、やり直してください。</p>
+      <div class="bottom">
+        <button class="btn go act" data-act="retry">もう一度(モーターが回ります)</button>
+        <button class="btn sub act" data-cmd="mot.home">中止</button>
+      </div>`;
+  },
+  selResult() {
+    if (local) return unitsLocalHtml();   // 一覧の行を押したら詳細(ページの中だけ)
+    return `<span class="state" data-k="label"></span>
+      <div data-k="selRes"></div>
+      <div data-k="unitList"></div>
+      <div class="bottom">
+        <button class="btn sub act" data-act="selRedo">測り直す(モーターが回ります)</button>
+        <div class="pair">
+          <button class="btn go act" data-cmd="sel.input">次の個体</button>
+          <button class="btn sub act" data-cmd="mot.home">ホームへ</button>
+        </div>
+      </div>`;
+  },
+  selList() {
+    if (local) return unitsLocalHtml();
+    return `<span class="state" data-k="label"></span>
+      <div data-k="unitList"></div>
+      <div class="bottom pair">
+        <button class="btn go act" data-cmd="sel.input">番号入力へ</button>
+        <button class="btn sub act" data-cmd="mot.home">ホームへ</button>
+      </div>`;
+  },
 };
+
+// 選別の一覧と詳細(ページの中だけで開く。本体は動かさない)
+function unitsLocalHtml() {
+  if (local === 'list') {
+    return `<span class="state">一覧(推定回転数の速い順)</span>
+      <div data-k="unitList"></div>
+      <div class="bottom"><button class="btn sub" data-act="back">戻る</button></div>`;
+  }
+  return `<span class="state">個体の詳細</span>
+    <div data-k="unitDetail"></div>
+    <div class="bottom"><button class="btn sub" data-act="list">一覧へ</button></div>`;
+}
+
+const unitRow = (no) => st.units.rows.find((r) => r.no === no) ?? null;
+
+// 作り直すのは中身が変わったときだけ(0.25 秒ごとの回転数で作り直さない)
+function setHtml(k, html) {
+  const el = view.querySelector(`[data-k="${k}"]`);
+  if (el && el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; }
+  return el;
+}
+
+// 手動運転のボタン(止まっている・回っている・一時停止で変わる)
+function manButtons(run) {
+  if (run === 2) return `<button class="btn sub act" data-cmd="man.pause">一時停止</button>${stopBtn('長押しで停止')}`;
+  if (run === 3) return `<button class="btn go act" data-act="manStart">再開(モーターが回ります)</button>${stopBtn('長押しで停止')}`;
+  return `<button class="btn go act" data-act="manStart">開始(モーターが回ります)</button>
+    <button class="btn sub act" data-cmd="mot.home">戻る</button>`;
+}
 
 // 3.0V の確認の回転数を全部並べる枠(慣らし中と結果の一番下)
 function checksBox() {
@@ -416,12 +540,12 @@ function fillCrsSetup() {
 
 function render() {
   const scr = screenFor(st);
-  if (scr !== 'motMenu') local = null;
-  const key = scr === 'motMenu' && local ? `motMenu:${local}` : scr;
+  if (scr !== localFor) { local = null; localFor = scr; if (scr === 'selInput') selBi = false; }
+  const key = local ? `${scr}:${local}` : scr;
   if (key !== shown) {
     shown = key;
     view.innerHTML = SCREENS[scr]();
-    for (const el of view.querySelectorAll('[data-long]')) bindLongPress(el, () => send(el.dataset.long));
+    bindLongPresses(view);
   }
   const s = st.status;
   view.classList.toggle('off', !st.connected);
@@ -478,6 +602,7 @@ function render() {
     const html = checksRows(st.checks.rpm);
     if (chk.dataset.html !== html) { chk.dataset.html = html; chk.innerHTML = html; }   // 0.25 秒ごとに作り直さない
   }
+  renderStage2(scr, s);
   if (scr === 'motMenu') {
     const c = st.config;
     setK('crsSummary', crsSummary(c));
@@ -492,10 +617,63 @@ function render() {
 }
 store.onChange = render;
 
+function bindLongPresses(root) {
+  for (const el of root.querySelectorAll('[data-long]')) bindLongPress(el, () => send(el.dataset.long));
+}
+
+// 段階2 の画面の値
+function renderStage2(scr, s) {
+  if (scr === 'batSetup') {
+    setK('buz', s.buz ? 'ON' : 'OFF');
+    setK('race', s.race ? 'ON' : 'OFF');
+  }
+  if (scr === 'batRun') view.querySelector('[data-k="bdoneBox"]').hidden = !s.bdone;
+  if (scr === 'run') {
+    const b = view.querySelector('[data-k="skipBtn"]');
+    b.hidden = !s.skip;
+    b.textContent = s.label === '冷却中' ? '冷却を飛ばす' : '休憩を飛ばす(モーターが回ります)';
+  }
+  if (scr === 'manual') {
+    view.querySelector('.state')?.classList.toggle('run', s.run === 2);
+    setK('manNote', s.run === 1 ? 'モーターをつないだのを検出しました(まもなく回ります)'
+      : s.run === 0 ? '「開始」を押すと、下の電圧で回ります' : '今の回転数(本体の画面と同じ)');
+    setK('kv', typeof s.live === 'number' && s.v > 0.1 ? num(s.live / s.v) : '—');
+    setField('manV', (s.mset / 10).toFixed(1));
+    const box = view.querySelector('[data-k="manBtns"]');
+    if (box.dataset.run !== String(s.run)) { box.dataset.run = String(s.run); box.innerHTML = manButtons(s.run); bindLongPresses(box); }
+  }
+  const rows = st.units.rows;
+  if (local === 'list' || (scr === 'selList' && !local)) setHtml('unitList', unitListHtml(rows, null));
+  if (local?.startsWith('d:')) {
+    const r = unitRow(+local.slice(2));
+    setHtml('unitDetail', r ? unitDetailHtml(r) : '<p class="note">この個体の記録がありません</p>');
+  }
+  if (scr === 'selResult') {
+    setHtml('selRes', unitResultHtml(unitRow(s.sel_no), s.note));
+    setHtml('unitList', unitListHtml(rows, s.sel_no));
+  }
+  if (scr === 'selInput' && !local) {
+    const f = view.querySelector('[data-f="selNo"]');
+    if (f && !f.value && s.next_unit) f.value = String(s.next_unit);
+    const no = parseInt(f?.value, 10);
+    const r = unitRow(no);
+    const lockedBi = !!r?.bi;                       // 記録で慣らし済の個体は新品に戻せない(本体と同じ)
+    const bi = lockedBi || selBi;
+    for (const el of view.querySelectorAll('[data-bi]')) {
+      el.classList.toggle('on', (el.dataset.bi === '1') === bi);
+      el.disabled = lockedBi && el.dataset.bi === '0';
+    }
+    view.querySelector('[data-k="selRenew"]').hidden = !r;
+    setK('selNoNote', !(no >= 1 && no <= 999) ? '番号は 1〜999'
+      : r ? `前に測った個体です(${r.bi ? '慣らし済' : '新品'})。測ると記録に足します` : '新しい番号です');
+  }
+}
+
 // ===== 押したとき =====
 view.addEventListener('click', async (e) => {
   const el = e.target.closest('button');
   if (!el || el.disabled) return;
+  if (el.dataset.unit) { local = `d:${el.dataset.unit}`; render(); return; }
   if (el.dataset.cmd) {
     send(el.dataset.cmd, el.dataset.arg === undefined ? undefined : Number(el.dataset.arg));
     if (el.dataset.cmd === 'mot.type') { local = null; render(); }
@@ -505,6 +683,40 @@ view.addEventListener('click', async (e) => {
   switch (el.dataset.act) {
     case 'connect': connectTap(); break;
     case 'crs': local = 'crs'; render(); break;
+    case 'list': local = 'list'; render(); break;
+    case 'buz': send('bat.buzzer', s?.buz ? 0 : 1); break;
+    case 'race': send('bat.race', s?.race ? 0 : 1); break;
+    case 'skip':
+      if (s?.label === '冷却中') { if (await ask('冷却を飛ばしますか?\n本体の案内が出たら、それに従ってください。', '飛ばす')) send('skip'); }
+      else if (await ask('休憩を飛ばして次のステップへ進みますか?\nモーターが回ることがあります。', '飛ばす')) send('skip');
+      break;
+    case 'manV': {
+      const v = Math.round(parseFloat(view.querySelector('[data-f="manV"]').value) * 10);
+      if (!(v >= 5 && v <= 30)) { toast('電圧は 0.5〜3.0V で入れてください'); return; }
+      send('man.v', v);
+      break;
+    }
+    case 'manStart':
+      if (await ask(`${num((s?.mset ?? 0) / 10, 1)}V でモーターを回します。`, '回す')) send('man.start');
+      break;
+    case 'selBi': selBi = el.dataset.bi === '1'; render(); break;
+    case 'selRenew': {
+      const no = parseInt(view.querySelector('[data-f="selNo"]').value, 10);
+      if (await ask(`${no} 番を新しい個体にしますか?\n前の記録は残りますが、これからは別の個体として比べます。`, '付け替える')) send('sel.renew', no);
+      break;
+    }
+    case 'selStart': {
+      const no = parseInt(view.querySelector('[data-f="selNo"]').value, 10);
+      if (!(no >= 1 && no <= 999)) { toast('個体の番号は 1〜999 で入れてください'); return; }
+      const bi = !!unitRow(no)?.bi || selBi;
+      if (await ask(`${no} 番(${bi ? '慣らし済' : '新品'})を測ります。\n本体の案内に従ってセレクターを付け外しします。`, '測る')) {
+        send(bi ? 'sel.startbi' : 'sel.start', no);
+      }
+      break;
+    }
+    case 'selRedo':
+      if (await ask('同じ番号で、無負荷から測り直します。モーターが回ります。', '測り直す')) send('sel.redo');
+      break;
     case 'motors': local = 'motors'; render(); break;
     case 'back': local = null; render(); break;
     case 'next':
@@ -529,6 +741,7 @@ view.addEventListener('change', (e) => {
   const el = e.target;
   const f = el.dataset.f;
   if (!f) return;
+  if (f === 'selNo' || f === 'manV') { render(); return; }   // 送るのはボタンを押したとき
   const int = (v) => parseInt(v, 10);
   switch (f) {
     case 'mode': case 'check': case 'periodic': case 'pre': case 'post':
@@ -564,7 +777,8 @@ const demo = {
   phase: 0,
   status(phase) {
     const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, target: 0, elapsed_s: 0, max_s: 0, rpm: null, live: null,
-      checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12 };
+      checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12,
+      run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0 };
     const set = {
       0: {}, 1: { label: 'READY', v: 2.41 }, 2: { label: 'READY', v: 2.41, detect_s: 3 },
       3: { label: 'CHARGE', v: 2.63, i: 1.24, mah: 312, elapsed_s: 754 }, 4: { label: 'RESULT', mah: 690, elapsed_s: 1830 },
@@ -572,6 +786,13 @@ const demo = {
       8: { label: '手動運転', rpm: 21000, live: 21030 }, 9: { label: 'コース1/3 診断(前)', prompt: 'セレクターを外してください' },
       10: { label: '慣らし', rpm: 15980, live: 16020, target: 36000, elapsed_s: 4321, max_s: 21600, checks: 1, checks_max: 6, v: 1.5, i: 0.63 },
       11: { label: '測れませんでした' }, 12: { label: '結果', rpm: 36210, target: 36000, elapsed_s: 14400, max_s: 21600, checks: 4, checks_max: 6 },
+      13: { label: '手動運転', run: 0, v: 0.02 }, 14: { label: '手動運転 回転中', run: 2, live: 32480, v: 2.98, i: 1.12, elapsed_s: 222 },
+      15: { label: '選別　番号入力', next_unit: 13 }, 16: { label: '選別 No.13', prompt: 'セレクターを付けて負荷1にしてください', live: 28910, sel_no: 13 },
+      17: { label: '選別 No.13', live: 28880, sel_no: 13 }, 18: { label: '選別 No.13 測れませんでした', sel_no: 13 },
+      19: { label: '選別　結果', sel_no: 13, note: 'SDがないため保存しません' }, 20: { label: '選別　一覧' },
+      21: { phase: 14, label: '手動運転 一時停止', run: 3, live: 32100, v: 0, elapsed_s: 240 },
+      22: { phase: 10, label: '冷却中', skip: 1, target: 36000 },
+      23: { phase: 3, label: 'DONE', v: 2.80, i: 0.01, mah: 690, elapsed_s: 1830, bdone: 1 },
     };
     return JSON.stringify({ ...base, ...set[phase] });
   },
@@ -580,14 +801,26 @@ const demo = {
     const chk = phase === 10 ? [34120, 35020] : phase === 12 ? [34120, 35020, 35680, 36210] : [];
     store.apply(JSON.stringify({ t: 'k', course: 1, rpm: chk }));
     store.apply(this.status(phase));
+    if (phase === 15 || phase === 19 || phase === 20) this.units();
+  },
+  units() {
+    const rows = [
+      { no: 7, bi: 1, date: '11/08', nref: 36110, nl: 37200, prev: '前回 11/01 より +1.2%', pt: 1, life: '寿命 80%', lt: 1, ba: '慣らし前 → 後 +2.4%', flags: '' },
+      { no: 13, bi: 0, date: '11/09', nref: 35420, nl: 36980, prev: '前回なし', pt: 0, life: '寿命 64%', lt: 1, ba: '', flags: '？ 測り直しをすすめます(熱だれ)' },
+      { no: 2, bi: 1, date: '11/05', nref: 34870, nl: 36010, prev: '前回 10/30 より -0.8%', pt: 2, life: '寿命 22%', lt: 2, ba: '', flags: '' },
+    ];
+    rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'u', i, n: rows.length, ...r })));
   },
 };
 
 function demoCommand(id, op, arg) {
   setTimeout(() => {
     store.apply(JSON.stringify({ t: 'r', id, res: 'ok' }));
-    const go = { app: [0, 1, 6][arg], 'bat.cancel': 1, stop: demo.phase >= 9 ? 12 : demo.phase >= 6 ? 6 : 1, 'err.clear': 1,
-      close: demo.phase === 4 ? 1 : 6, next: 10, retry: 9, 'crs.start': 9 }[op];
+    const p = demo.phase;
+    const go = { app: [0, 1, 6][arg], 'bat.cancel': 1, stop: p >= 13 ? 6 : p >= 9 ? 12 : p >= 6 ? 6 : 1, 'err.clear': 1,
+      close: p === 4 ? 1 : 6, next: p === 16 ? 17 : 10, retry: p === 18 ? 16 : 9, 'crs.start': 9,
+      'man.enter': 13, 'man.start': 14, 'man.pause': 21, 'mot.home': 6, 'sel.enter': 15, 'sel.start': 16, 'sel.startbi': 16,
+      'sel.redo': 16, 'sel.input': 15, skip: 10, 'bat.finish': 3, 'bat.recheck': 3 }[op];
     if (go !== undefined) demo.show(go);
     if (op === 'bat.preset') store.apply(demo.status(demo.phase).replace('"preset":2.8', `"preset":${PRESETS[arg]}`));
   }, 150);
@@ -604,12 +837,13 @@ function startDemo() {
   store.apply(JSON.stringify({ t: 'h', course: 24, from: 0, rpm, i: rpm.map(() => 0.63) }));
   const bar = $('demo');
   bar.hidden = false;
-  const names = ['選択', '電池待機', '数え中', '充電中', '充電結果', 'エラー', 'モーター', '本体操作', '本体運転', '案内', '慣らし中', '失敗', '結果', '切断'];
-  bar.innerHTML = names.map((n, k) => `<button data-demo="${k}">${n}</button>`).join('');
+  const names = ['選択', '電池待機', '数え中', '充電中', '充電結果', 'エラー', 'モーター', '本体操作', '本体運転', '案内', '慣らし中', '失敗', '結果',
+    '手動', '手動回転', '選別番号', '選別案内', '選別中', '選別失敗', '選別結果', '選別一覧', '手動一時停止', '冷却中', '充電完了待ち'];
+  bar.innerHTML = names.map((n, k) => `<button data-demo="${k}">${n}</button>`).join('') + '<button data-demo="cut">切断</button>';
   bar.addEventListener('click', (e) => {
     const k = e.target.dataset.demo;
     if (k === undefined) return;
-    if (+k === 13) { store.markDisconnected(); return; }
+    if (k === 'cut') { store.markDisconnected(); return; }
     if (!st.connected) store.markConnected();
     demo.show(+k);
   });
