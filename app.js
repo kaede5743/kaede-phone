@@ -190,17 +190,37 @@ function rememberOwner(name) {
 // 送信キーはモーターラボの「本体の送信キー」(マスターのみ)で発行し、ここに一度入れる。この端末にだけ残る
 const LAB_KEY_STORE = 'kaede_phone_motorlab_key';
 const LAB_URL = 'https://asia-northeast1-kaede-race-maneger.cloudfunctions.net/addMotorLabMeasurement';
-function labKey() { try { return localStorage.getItem(LAB_KEY_STORE) || ''; } catch { return ''; } }
+function labKey() { try { return cleanLabKey(localStorage.getItem(LAB_KEY_STORE)); } catch { return ''; } }
+// キーは base64url(A-Z a-z 0-9 _ -)だけ。貼り付けで混ざる改行・空白・見えない文字は落とす
+const cleanLabKey = (v) => String(v || '').replace(/[^A-Za-z0-9_-]/g, '');
+
+// キーが受け口で通るかを確かめる(計測の値を付けずに送る: キーが合えば値の不備で 400、違えば 403)。
+// true = 有効 / false = 違う / null = 確かめられなかった(通信の失敗など)
+async function checkLabKey(key) {
+  if (DEMO) return true;
+  try {
+    const res = await fetch(LAB_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+    if (res.status === 401 || res.status === 403) return false;
+    return res.status === 400 ? true : null;
+  } catch { return null; }
+}
+
 async function editLabKey() {
   const cur = labKey();
   const v = window.prompt('モーターラボの送信キー(モーターラボの「本体の送信キー」で発行したもの)。空にすると消します。', cur);
   if (v === null) return;
+  const key = cleanLabKey(v);
   try {
-    if (v.trim()) localStorage.setItem(LAB_KEY_STORE, v.trim());
+    if (key) localStorage.setItem(LAB_KEY_STORE, key);
     else localStorage.removeItem(LAB_KEY_STORE);
-    toast(v.trim() ? '送信キーを保存しました' : '送信キーを消しました');
-  } catch { toast('この端末には保存できませんでした'); }
+  } catch { toast('この端末には保存できませんでした'); return; }
   render();
+  if (!key) { toast('送信キーを消しました'); return; }
+  toast('送信キーを確かめています…');
+  const ok = await checkLabKey(key);
+  toast(ok === true ? '送信キーは有効です(保存しました)'
+    : ok === false ? '送信キーが違います。モーターラボで最後に発行したキーを入れてください'
+    : '保存しました(通信できず、キーが合っているかは確かめられませんでした)');
 }
 
 // 本体が送信を頼んできた回(状態の mreq)。同じ回を二度送らない
