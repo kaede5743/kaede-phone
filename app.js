@@ -1,6 +1,6 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
-import { LineBuffer, createStore, screenFor, buildCommand, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
-import { esc, num, unitListHtml, unitDetailHtml, unitResultHtml } from './select.js';
+import { LineBuffer, createStore, screenFor, buildCommand, textArgOk, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
+import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, canResend } from './select.js';
 
 const SVC = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b01';
 const RX  = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b02';   // ページ → 本体
@@ -175,7 +175,19 @@ const stopBtn = (label = '長押しで中止') => `<button class="btn stop act" 
 // 画面ごとに骨組みを 1 回だけ作り、値は data-k の要素だけ書き換える(押している途中のボタンを作り直さない)
 let local = null;              // ページの中だけで開く画面: 'crs' | 'motors' | 'list' | 'd:<番号>'(本体は動かさない)
 let localFor = '';             // local を開いた画面。画面が変わったら閉じる
-let selBi = false;             // 選別の番号入力で「慣らし済」を選んだ
+// 計測の所有者の候補(この端末で入れた名前。新しい順に 20 件まで)
+const OWNERS_KEY = 'kaede_phone_owners';
+function loadOwners() {
+  try { const a = JSON.parse(localStorage.getItem(OWNERS_KEY) || '[]'); return Array.isArray(a) ? a.filter((x) => typeof x === 'string') : []; }
+  catch { return []; }
+}
+function rememberOwner(name) {
+  if (!name) return;
+  const a = [name, ...loadOwners().filter((x) => x !== name)].slice(0, 20);
+  try { localStorage.setItem(OWNERS_KEY, JSON.stringify(a)); } catch { /* 保存できなくても送るのはできる */ }
+}
+const ownerField = () => `<label class="row"><span>所有者</span><input class="act" data-f="owner" list="ownerList" autocomplete="off" aria-label="所有者の名前"></label>
+      <datalist id="ownerList">${loadOwners().map((o) => `<option value="${esc(o)}"></option>`).join('')}</datalist>`;
 let shown = '';
 
 const SCREENS = {
@@ -250,7 +262,7 @@ const SCREENS = {
       <p class="h" data-k="label"></p>
       <button class="row act" data-act="crs"><span>慣らし</span><span data-k="crsSummary"></span></button>
       <button class="row act" data-act="motors"><span>機種</span><span data-k="motorName"></span></button>
-      <button class="row act" data-cmd="sel.enter"><span>選別</span><span>›</span></button>
+      <button class="row act" data-cmd="sel.enter"><span>計測</span><span>›</span></button>
       <button class="row act" data-cmd="man.enter"><span>手動運転</span><span>›</span></button>
       <div class="bottom pair">
         <button class="btn sub act" data-cmd="app" data-arg="0">メニューへ</button>
@@ -363,16 +375,12 @@ const SCREENS = {
       <div class="bottom" data-k="manBtns"></div>`;
   },
   selInput() {
-    if (local) return unitsLocalHtml();
     return `<span class="state" data-k="label"></span>
+      <p class="note">機種は本体の帯をタップして選び直せます</p>
       <label class="row"><span>番号</span><input class="act" inputmode="numeric" data-f="selNo" aria-label="個体の番号"></label>
       <p class="note" data-k="selNoNote"></p>
-      <div class="chips two">
-        <button class="chip act" data-act="selBi" data-bi="0">新品</button>
-        <button class="chip act" data-act="selBi" data-bi="1">慣らし済</button>
-      </div>
-      <button class="btn sub act" data-act="selRenew" data-k="selRenew" hidden>番号の付け替え</button>
-      <button class="btn sub act" data-act="list">一覧(推定回転数の速い順)</button>
+      ${ownerField()}
+      <p class="note">負荷(セレクター付き 2.8V・105mΩ)10 秒 → 無負荷(3.0V)10 秒</p>
       <div class="bottom">
         <button class="btn go act" data-act="selStart">測定開始(モーターが回ります)</button>
         <button class="btn sub act" data-cmd="mot.home">戻る</button>
@@ -405,17 +413,10 @@ const SCREENS = {
       </div>`;
   },
   selResult() {
-    if (local) return unitsLocalHtml();   // 一覧の行を押したら詳細(ページの中だけ)
     return `<span class="state" data-k="label"></span>
       <div data-k="selRes"></div>
-      <div data-k="unitList"></div>
-      <div class="bottom">
-        <button class="btn sub act" data-act="selRedo">測り直す(モーターが回ります)</button>
-        <div class="pair">
-          <button class="btn go act" data-cmd="sel.input">次の個体</button>
-          <button class="btn sub act" data-cmd="mot.home">ホームへ</button>
-        </div>
-      </div>`;
+      <div data-k="ownerBox">${ownerField()}</div>
+      <div class="bottom" data-k="selBtns"></div>`;
   },
   selList() {
     if (local) return unitsLocalHtml();
@@ -569,7 +570,7 @@ function fillCrsSetup() {
 
 function render() {
   const scr = screenFor(st);
-  if (scr !== localFor) { local = null; localFor = scr; if (scr === 'selInput') selBi = false; }
+  if (scr !== localFor) { local = null; localFor = scr; }
   const key = local ? `${scr}:${local}` : scr;
   if (key !== shown) {
     shown = key;
@@ -702,23 +703,33 @@ function renderStage2(scr, s) {
     setHtml('unitDetail', r ? unitDetailHtml(r) : '<p class="note">この個体の記録がありません</p>');
   }
   if (scr === 'selResult') {
-    setHtml('selRes', unitResultHtml(unitRow(s.sel_no), s.note));
-    setHtml('unitList', unitListHtml(rows, s.sel_no));
+    setHtml('selRes', measResultHtml(s));
+    view.querySelector('[data-k="ownerBox"]').hidden = !!s.msaved;   // 保存したあとは変えられない
+    // ボタン: 保存前 = 保存 / 終了。保存後 = (再送) / 次を測る / 終了
+    const btns = view.querySelector('[data-k="selBtns"]');
+    const sig = `${s.msaved}:${s.mup}`;
+    if (btns.dataset.sig !== sig) {
+      btns.dataset.sig = sig;
+      btns.innerHTML = !s.msaved
+        ? `<button class="btn go act" data-act="selSave">保存(モーターラボに登録)</button>
+           <button class="btn sub act" data-act="selEnd">終了(保存しない)</button>`
+        : `${canResend(s) ? '<button class="btn go act" data-act="selSave">モーターラボに再送</button>' : ''}
+           <div class="pair">
+             <button class="btn go act" data-cmd="sel.input">次を測る</button>
+             <button class="btn sub act" data-cmd="sel.end">終了</button>
+           </div>`;
+    }
   }
-  if (scr === 'selInput' && !local) {
+  if (scr === 'selInput' || scr === 'selResult') {
+    // 所有者の欄: 本体が持っている名前を入れておく(打っている途中は書き換えない)
+    const o = view.querySelector('[data-f="owner"]');
+    if (o && o !== document.activeElement && o.value !== (s.owner || '')) o.value = s.owner || '';
+  }
+  if (scr === 'selInput') {
     const f = view.querySelector('[data-f="selNo"]');
     if (f && !f.value && s.next_unit) f.value = String(s.next_unit);
     const no = parseInt(f?.value, 10);
-    const r = unitRow(no);
-    const lockedBi = !!r?.bi;                       // 記録で慣らし済の個体は新品に戻せない(本体と同じ)
-    const bi = lockedBi || selBi;
-    for (const el of view.querySelectorAll('[data-bi]')) {
-      el.classList.toggle('on', (el.dataset.bi === '1') === bi);
-      el.disabled = lockedBi && el.dataset.bi === '0';
-    }
-    view.querySelector('[data-k="selRenew"]').hidden = !r;
-    setK('selNoNote', !(no >= 1 && no <= 999) ? '番号は 1〜999'
-      : r ? `前に測った個体です(${r.bi ? '慣らし済' : '新品'})。測ると記録に足します` : '新しい番号です');
+    setK('selNoNote', !(no >= 1 && no <= 999) ? '番号は 1〜999' : '');
   }
 }
 
@@ -761,23 +772,21 @@ view.addEventListener('click', async (e) => {
     case 'manStart':
       if (await ask(`${num((s?.mset ?? 0) / 10, 1)}V でモーターを回します。`, '回す')) send('man.start');
       break;
-    case 'selBi': selBi = el.dataset.bi === '1'; render(); break;
-    case 'selRenew': {
-      const no = parseInt(view.querySelector('[data-f="selNo"]').value, 10);
-      if (await ask(`${no} 番を新しい個体にしますか?\n前の記録は残りますが、これからは別の個体として比べます。`, '付け替える')) send('sel.renew', no);
-      break;
-    }
     case 'selStart': {
       const no = parseInt(view.querySelector('[data-f="selNo"]').value, 10);
       if (!(no >= 1 && no <= 999)) { toast('個体の番号は 1〜999 で入れてください'); return; }
-      const bi = !!unitRow(no)?.bi || selBi;
-      if (await ask(`${no} 番(${bi ? '慣らし済' : '新品'})を測ります。\n本体の案内に従ってセレクターを付け外しします。`, '測る')) {
-        send(bi ? 'sel.startbi' : 'sel.start', no);
+      const owner = s?.owner || '';
+      if (await ask(`${no} 番(所有者: ${owner || '未入力'})を測ります。\nセレクターを付けて負荷 10 秒 → 外して無負荷 10 秒。本体の案内に従ってください。`, '測る')) {
+        send('sel.start', no);
       }
       break;
     }
-    case 'selRedo':
-      if (await ask('同じ番号で、無負荷から測り直します。モーターが回ります。', '測り直す')) send('sel.redo');
+    case 'selSave':
+      if (!s?.owner && !(await ask('所有者が入っていません。このまま保存しますか?\n(モーターラボで後から直せます)', '保存する'))) return;
+      send('sel.save');
+      break;
+    case 'selEnd':
+      if (await ask('保存しないで終わりますか?\nこの計測は残りません。', '終了')) send('sel.end');
       break;
     case 'motors': local = 'motors'; render(); break;
     case 'back': local = null; render(); break;
@@ -804,6 +813,13 @@ view.addEventListener('change', (e) => {
   const f = el.dataset.f;
   if (!f) return;
   if (f === 'selNo' || f === 'manV' || f === 'spdTire') { render(); return; }   // 送るのはボタンを押したとき
+  if (f === 'owner') {
+    const name = el.value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+    if (!textArgOk(name)) { toast('所有者の名前が長すぎます(日本語でおよそ 15 文字まで)'); return; }
+    rememberOwner(name);
+    send('sel.owner', name);
+    return;
+  }
   const int = (v) => parseInt(v, 10);
   switch (f) {
     case 'mode': case 'check': case 'periodic': case 'pre': case 'post':
@@ -838,22 +854,25 @@ view.addEventListener('change', (e) => {
 const demo = {
   phase: 0,
   spd: { tire: 235, gi: 0, smot: 2, smax: 36210 },
+  meas: { owner: 'かえで', saved: 0, up: 0 },
   status(phase) {
     const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, target: 0, elapsed_s: 0, max_s: 0, rpm: null, live: null,
       checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12,
       run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0,
-      tire: demo.spd.tire, gear: GEARS_X10[demo.spd.gi], gi: demo.spd.gi, smot: demo.spd.smot, smax: demo.spd.smax };
+      tire: demo.spd.tire, gear: GEARS_X10[demo.spd.gi], gi: demo.spd.gi, smot: demo.spd.smot, smax: demo.spd.smax,
+      mload: null, mnl: null, mw: null, mrank: 0, mtotal: 0, msaved: 0, mup: 0, owner: demo.meas.owner };
     const set = {
       0: {}, 1: { label: 'READY', v: 2.41 }, 2: { label: 'READY', v: 2.41, detect_s: 3 },
       3: { label: 'CHARGE', v: 2.63, i: 1.24, mah: 312, elapsed_s: 754 }, 4: { label: 'RESULT', mah: 690, elapsed_s: 1830 },
-      5: { label: 'ERROR', error: 'OVER TEMP' }, 6: { label: 'ハイパーダッシュ3' }, 7: { label: '選別', live: 30480 },
+      5: { label: 'ERROR', error: 'OVER TEMP' }, 6: { label: 'ハイパーダッシュ3' }, 7: { label: '計測', live: 30480 },
       8: { label: '手動運転', rpm: 21000, live: 21030 }, 9: { label: 'コース1/3 診断(前)', prompt: 'セレクターを外してください' },
       10: { label: '慣らし', rpm: 15980, live: 16020, target: 36000, elapsed_s: 4321, max_s: 21600, checks: 1, checks_max: 6, v: 1.5, i: 0.63 },
       11: { label: '測れませんでした' }, 12: { label: '結果', rpm: 36210, target: 36000, elapsed_s: 14400, max_s: 21600, checks: 4, checks_max: 6 },
       13: { label: '手動運転', run: 0, v: 0.02 }, 14: { label: '手動運転 回転中', run: 2, live: 32480, v: 2.98, i: 1.12, elapsed_s: 222 },
-      15: { label: '選別　番号入力', next_unit: 13 }, 16: { label: '選別 No.13', prompt: 'セレクターを付けて負荷1にしてください', live: 28910, sel_no: 13 },
-      17: { label: '選別 No.13', live: 28880, sel_no: 13 }, 18: { label: '選別 No.13 測れませんでした', sel_no: 13 },
-      19: { label: '選別　結果', sel_no: 13, note: 'SDがないため保存しません' }, 20: { label: '選別　一覧' },
+      15: { label: '計測　番号入力', next_unit: 13 }, 16: { label: '計測 No.13', prompt: 'セレクターを付けてください(負荷 10秒)', live: 28910, sel_no: 13 },
+      17: { label: '計測 No.13', live: 28880, sel_no: 13 }, 18: { label: '計測 No.13 測れませんでした', sel_no: 13 },
+      19: { label: '計測　結果', sel_no: 13, mload: 15234, mnl: 17610, mw: 6.12, mrank: 3, mtotal: 12, msaved: demo.meas.saved, mup: demo.meas.up },
+      20: { label: '計測　一覧' },
       21: { phase: 14, label: '手動運転 一時停止', run: 3, live: 32100, v: 0, elapsed_s: 240 },
       22: { phase: 10, label: '冷却中', skip: 1, target: 36000 },
       23: { phase: 3, label: 'DONE', v: 2.80, i: 0.01, mah: 690, elapsed_s: 1830, bdone: 1 },
@@ -887,10 +906,13 @@ function demoCommand(id, op, arg) {
     if (op === 'spd.gear') demo.spd.gi = arg;
     if (op === 'spd.motor') { demo.spd.smot = arg; demo.spd.smax = null; }
     if (op === 'spd.clr') demo.spd.smax = null;
+    if (op === 'sel.owner') demo.meas.owner = arg || '';
+    if (op === 'sel.save') { demo.meas.saved = 1; demo.meas.up = demo.meas.up === 3 ? 1 : 3; }   // 1 回目は Wi-Fi なし、再送で登録
+    if (op === 'sel.start' || op === 'sel.input') { demo.meas.saved = 0; demo.meas.up = 0; }
     const go = { app: [0, 1, 6, 24][arg], 'bat.cancel': 1, stop: p >= 13 ? 6 : p >= 9 ? 12 : p >= 6 ? 6 : 1, 'err.clear': 1,
       close: p === 4 ? 1 : 6, next: p === 16 ? 17 : 10, retry: p === 18 ? 16 : 9, 'crs.start': 9,
       'man.enter': 13, 'man.start': 14, 'man.pause': 21, 'mot.home': 6, 'sel.enter': 15, 'sel.start': 16, 'sel.startbi': 16,
-      'sel.redo': 16, 'sel.input': 15, skip: 10, 'bat.finish': 3, 'bat.recheck': 3,
+      'sel.redo': 16, 'sel.input': 15, 'sel.save': 19, 'sel.end': 6, 'sel.owner': p, skip: 10, 'bat.finish': 3, 'bat.recheck': 3,
       'spd.tire': p, 'spd.gear': p, 'spd.motor': p, 'spd.clr': p }[op];
     if (go !== undefined) demo.show(go);
     if (op === 'bat.preset') store.apply(demo.status(demo.phase).replace('"preset":2.8', `"preset":${PRESETS[arg]}`));
@@ -909,7 +931,7 @@ function startDemo() {
   const bar = $('demo');
   bar.hidden = false;
   const names = ['選択', '電池待機', '数え中', '充電中', '充電結果', 'エラー', 'モーター', '本体操作', '本体運転', '案内', '慣らし中', '失敗', '結果',
-    '手動', '手動回転', '選別番号', '選別案内', '選別中', '選別失敗', '選別結果', '選別一覧', '手動一時停止', '冷却中', '充電完了待ち',
+    '手動', '手動回転', '計測番号', '計測案内', '計測中', '計測失敗', '計測結果', '(旧)一覧', '手動一時停止', '冷却中', '充電完了待ち',
     'スピード', 'スピード設定中', 'スピード測れず'];
   bar.innerHTML = names.map((n, k) => `<button data-demo="${k}">${n}</button>`).join('') + '<button data-demo="cut">切断</button>';
   bar.addEventListener('click', (e) => {
