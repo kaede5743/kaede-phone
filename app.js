@@ -21,22 +21,24 @@ let pending = null;            // { id, op, timer }
 const queue = [];              // { op, arg }
 let rxChar = null;
 
-function send(op, arg) {
-  if (!st.connected) { toast('つながっていません'); return; }
-  if (pending && pending.op === op && arg === undefined) return;   // 連打
-  const q = queue.find((x) => x.op === op);
+// multi: 同じ命令を値を変えて何度も送る(sel.del)。ふつうは最後の値だけ送る(設定のつまみなど)
+// onOk: 本体が ok と返したときに呼ぶ(sel.del の送れた印を覚える)
+function send(op, arg, multi = false, onOk = null) {
+  if (!st.connected) { if (!multi) toast('つながっていません'); return; }
+  if (!multi && pending && pending.op === op && arg === undefined) return;   // 連打
+  const q = !multi && queue.find((x) => x.op === op);
   if (q) { q.arg = arg; return; }
-  queue.push({ op, arg });
+  queue.push({ op, arg, onOk, quiet: multi });
   pump();
 }
 
 async function pump() {
   if (pending || queue.length === 0) return;
-  const { op, arg } = queue.shift();
+  const { op, arg, onOk, quiet } = queue.shift();
   const id = nextId;
   nextId = nextId >= 65535 ? 1 : nextId + 1;
   const line = buildCommand(id, op, arg);
-  pending = { id, op, timer: setTimeout(() => { pending = null; toast('届きませんでした'); pump(); }, REPLY_TIMEOUT_MS) };
+  pending = { id, op, onOk, quiet, timer: setTimeout(() => { pending = null; if (!quiet) toast('届きませんでした'); pump(); }, REPLY_TIMEOUT_MS) };
   try {
     if (DEMO) demoCommand(id, op, arg);
     else await rxChar.writeValueWithResponse(new TextEncoder().encode(line));
@@ -51,8 +53,10 @@ async function pump() {
 store.onReply = (id, res) => {
   if (!pending || pending.id !== id) return;
   clearTimeout(pending.timer);
+  const p = pending;
   pending = null;
-  if (res !== 'ok') toast(REJECT_TEXT[res] || `断られました (${res})`);
+  if (res === 'ok') { if (p.onOk) p.onOk(); }
+  else if (!p.quiet) toast(REJECT_TEXT[res] || `断られました (${res})`);   // sel.del など続けて送る命令は黙って次へ
   pump();
 };
 
@@ -247,6 +251,52 @@ async function labUploadIfRequested(s) {
     code = 5;
   }
   send('sel.uploaded', code);
+}
+
+// ===== モーターラボで消した計測を、本体の記録(順位)からも外す =====
+// 本体が状態に載せる機種のキー(mkey)の分だけ、消した計測の印「番号|計測日|負荷時回転数」を受け口から受け取り、
+// まだ送っていない印を sel.del で本体へ送る。送った印はこの端末に覚えておく(本体も同じ印は二度当てない)
+const LAB_DEL_URL = 'https://asia-northeast1-kaede-race-maneger.cloudfunctions.net/listMotorLabDeleted';
+const DEL_SENT_STORE = 'kaede_phone_del_sent';
+const DEL_PHASES = [PHASE.MOT_IDLE, PHASE.SEL_INPUT, PHASE.SEL_RESULT];   // 本体が受け付ける画面(回っていない)
+const DEL_REFETCH_MS = 3 * 60 * 1000;
+let delFetchedFor = '';   // 最後に受け取った機種(つなぎ直したら空に戻す)
+let delFetchedAt = 0;
+let delBusy = false;
+function delSent() { try { const o = JSON.parse(localStorage.getItem(DEL_SENT_STORE) || '{}'); return o && typeof o === 'object' ? o : {}; } catch { return {}; } }
+function saveDelSent(o) { try { localStorage.setItem(DEL_SENT_STORE, JSON.stringify(o)); } catch { /* 覚えられなくても本体は二度当てない */ } }
+async function syncDeleted(s) {
+  if (DEMO || delBusy || !s || st.stale || !st.connected || !s.mkey || !DEL_PHASES.includes(s.phase)) return;
+  const key = labKey();
+  if (!key) return;
+  if (delFetchedFor === s.mkey && Date.now() - delFetchedAt < DEL_REFETCH_MS) return;
+  delBusy = true;
+  const mkey = s.mkey;
+  try {
+    const res = await fetch(LAB_DEL_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, motor: mkey }) });
+    if (!res.ok) return;
+    const data = await res.json();
+    delFetchedFor = mkey;
+    delFetchedAt = Date.now();
+    const sent = delSent();
+    const done = new Set(Array.isArray(sent[mkey]) ? sent[mkey] : []);
+    for (const q of queue) if (q.op === 'sel.del') done.add(q.arg);   // 送っている途中の印は重ねない
+    const todo = (Array.isArray(data.deleted) ? data.deleted : []).filter((sig) => !done.has(sig) && textArgOk(sig));
+    if (!todo.length || st.status?.mkey !== mkey) return;   // 送るあいだに機種が変わったら、次の回に
+    // 本体が ok と返した印だけ覚える(古い本体・SD に書けなかったときは、次につないだときに送り直す)
+    for (const sig of todo) {
+      send('sel.del', sig, true, () => {
+        const o = delSent();
+        const list = Array.isArray(o[mkey]) ? o[mkey] : [];
+        if (!list.includes(sig)) o[mkey] = [...list, sig].slice(-300);
+        saveDelSent(o);
+      });
+    }
+  } catch (e) {
+    console.warn('消した計測の印を受け取れませんでした', e);
+  } finally {
+    delBusy = false;
+  }
 }
 
 const ownerField = () => `<label class="row"><span>所有者</span><input class="act" data-f="owner" list="ownerList" autocomplete="off" aria-label="所有者の名前"></label>
@@ -711,7 +761,13 @@ function render() {
     }
   }
 }
-store.onChange = () => { render(); labUploadIfRequested(st.status); };
+let wasConnected = false;
+store.onChange = () => {
+  if (st.connected !== wasConnected) { wasConnected = st.connected; delFetchedFor = ''; }   // つなぎ直したら受け取り直す
+  render();
+  labUploadIfRequested(st.status);
+  syncDeleted(st.status);
+};
 
 // スピードマネージャーの値。速度はページで計算する(本体の画面と同じ式)
 function speedBand(s) {
