@@ -42,3 +42,31 @@ export function unitResultHtml(r, note) {
       <div class="cell"><b class="${tone(r.lt)}">${esc(r.life) || '—'}</b><span>寿命の目安</span></div>
     </div>${r.flags ? `<p class="note">${esc(r.flags)}</p>` : ''}`;
 }
+
+// ===== 計測(旧 選別)の結果。値は本体の状態 {"t":"s"} の mload・mnl・mw・mrank・mtotal・msaved・mup =====
+// 本体の MeasUpload と同じ番号(0=まだ 1=登録 2=スマホなし 3=送信中 4=キー違い 5=失敗 6=モーターラボが古い形式
+// 7=スマホに送信キーなし)。送るのはこのページ(本体は Wi-Fi を使わない)
+export const UPLOAD_TEXT = ['', 'モーターラボに登録しました', 'スマホがつながっていませんでした',
+  'モーターラボに送っています…', '送信キーが受け付けられませんでした', 'モーターラボに送れませんでした',
+  'モーターラボが新しい形式になっていません', 'このスマホに送信キーが入っていません'];
+
+// 送れなかったので再送できるか(本体の sel_canResend と同じ)
+export const canResend = (s) => !!s?.msaved && s.mup !== 1 && s.mup !== 3;
+
+export function measResultHtml(s) {
+  if (!s) return '<p class="note">結果を受け取っています</p>';
+  const rank = s.mrank > 0 ? `${s.mrank}<small> 位 / ${s.mtotal} 本</small>` : '—';
+  const note = s.note ? `<p class="banner bad">${esc(s.note)}</p>` : '';
+  let saved = '';
+  if (s.msaved) {
+    const cls = s.mup === 1 ? 'up' : s.mup === 3 ? '' : 'warn';
+    saved = `<p class="note ${cls}">${esc(UPLOAD_TEXT[s.mup] || '')}</p>`;
+  }
+  return `${note}<p class="h">${s.sel_no} 番</p>
+    <div class="grid">
+      <div class="cell"><b>${num(s.mload)}</b><span>負荷時回転数 rpm</span></div>
+      <div class="cell"><b>${num(s.mnl)}</b><span>無負荷回転数 rpm</span></div>
+      <div class="cell"><b>${num(s.mw, 2)}</b><span>消費電力 W</span></div>
+      <div class="cell"><b>${rank}</b><span>SD の記録の中で(負荷時)</span></div>
+    </div>${saved}`;
+}

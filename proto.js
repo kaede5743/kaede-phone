@@ -155,9 +155,23 @@ export function screenFor(state) {
   return SCREEN_OF_PHASE[state.status.phase] ?? 'motBusy';
 }
 
+// 文字の引数(所有者の名前)の最大バイト数。本体の PH_TEXT_MAX - 1
+export const TEXT_ARG_MAX_BYTES = 47;
+
+// 文字の引数として送れるか(制御文字なし・UTF-8 で 47 バイトまで)
+export function textArgOk(text) {
+  return typeof text === 'string' && !/[\u0000-\u001f\u007f]/.test(text) &&
+    new TextEncoder().encode(text).length <= TEXT_ARG_MAX_BYTES;
+}
+
+// arg: 数値(整数)か、文字の引数をとる命令(sel.owner)なら文字列。空の文字列は引数なし
 export function buildCommand(id, op, arg) {
   if (!Number.isInteger(id) || id < 0 || id > 65535) throw new Error('bad id');
   if (!/^[a-z.]+$/.test(op)) throw new Error('bad op');
+  if (typeof arg === 'string') {
+    if (!textArgOk(arg)) throw new Error('bad text');
+    return arg === '' ? `${id} ${op}\n` : `${id} ${op} ${arg}\n`;
+  }
   if (arg === undefined) return `${id} ${op}\n`;
   if (!Number.isInteger(arg)) throw new Error('bad arg');
   return `${id} ${op} ${arg}\n`;
