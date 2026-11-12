@@ -69,6 +69,7 @@ export function createStore() {
     history: { course: null, rpm: [], i: [] },
     checks: { course: null, rpm: [] },   // 3.0V の確認の回転数(測れた回だけ)
     units: { n: 0, rows: [], complete: false },   // 選別の個体の一覧(本体が推定回転数の速い順に送る)
+    measDetail: null,      // 計測の詳細 {"t":"md"}(最後に届いたもの。番号 no で今の結果のものか確かめる)
     versionOk: true,
   };
   const store = {
@@ -96,6 +97,10 @@ export function createStore() {
           break;
         case 'u':
           if (!applyUnit(state.units, m)) return false;
+          break;
+        case 'md':   // 計測の詳細(結果の画面に入ったときと sel.detail のとき)
+          if (typeof m.no !== 'number') return false;
+          state.measDetail = m;
           break;
         case 'k':   // 本体は変わるたびに一覧を全部送る
           if (!Array.isArray(m.rpm) || !m.rpm.every((v) => typeof v === 'number')) return false;

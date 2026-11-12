@@ -1,6 +1,6 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
 import { LineBuffer, createStore, screenFor, buildCommand, textArgOk, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
-import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, canResend } from './select.js';
+import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, canResend } from './select.js';
 
 const SVC = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b01';
 const RX  = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b02';   // ページ → 本体
@@ -227,23 +227,33 @@ async function editLabKey() {
     : '保存しました(通信できず、キーが合っているかは確かめられませんでした)');
 }
 
-// 本体が送信を頼んできた回(状態の mreq)。同じ回を二度送らない
+// 本体が送信を頼んできた回(状態の mreq2)。同じ回を二度送らない。
+// (負荷1点の頃の本体は mreq で頼んできたが、その本体の値は今の形と合わないので送らない)
+// 本文には詳細 {"t":"md"} の値も入れるので、まだ届いていなければ本体に sel.detail で頼んで待つ(10 秒まで)
 let labSentReq = 0;
+let detailAskedAt = 0;   // 結果の画面で詳細を頼んだとき
+let labWaitReq = 0, labWaitSince = 0, labAskedAt = 0;
+const LAB_DETAIL_WAIT_MS = 10000;
 async function labUploadIfRequested(s) {
-  if (!s || s.phase !== PHASE.SEL_RESULT || !s.mreq || s.mreq === labSentReq || st.stale) return;
-  labSentReq = s.mreq;
+  if (!s || s.phase !== PHASE.SEL_RESULT || !s.mreq2 || s.mreq2 === labSentReq || st.stale) return;
   const key = labKey();
-  if (!key) { send('sel.uploaded', 7); toast('送信キーが入っていません(モーターのメニューで入れられます)'); return; }
+  if (!key) { labSentReq = s.mreq2; send('sel.uploaded', 7); toast('送信キーが入っていません(モーターのメニューで入れられます)'); return; }
+  const body = measLabBody(s, st.measDetail, key);
+  if (!body) {
+    const now = Date.now();
+    if (labWaitReq !== s.mreq2) { labWaitReq = s.mreq2; labWaitSince = now; labAskedAt = 0; }
+    if (now - labWaitSince > LAB_DETAIL_WAIT_MS) { labSentReq = s.mreq2; send('sel.uploaded', 5); return; }
+    if (now - labAskedAt > 3000) { labAskedAt = now; send('sel.detail'); }
+    return;
+  }
+  labSentReq = s.mreq2;
   if (DEMO) { setTimeout(() => send('sel.uploaded', 1), 600); return; }
   let code = 5;
   try {
     const res = await fetch(LAB_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        key, motor: s.mkey, no: String(s.sel_no).padStart(3, '0'),
-        rpm: s.mload ?? 0, rpmNl: s.mnl ?? 0, w: s.mw ?? 0, date: s.mdate || '', owner: s.owner || '',
-      }),
+      body: JSON.stringify(body),
     });
     code = res.ok ? 1 : (res.status === 401 || res.status === 403) ? 4 : res.status === 409 ? 6 : 5;
   } catch (e) {
@@ -529,6 +539,7 @@ const SCREENS = {
   selResult() {
     return `<span class="state" data-k="label"></span>
       <div data-k="selRes"></div>
+      <details class="det"><summary>詳細(段ごとの値)</summary><div data-k="selDet"></div></details>
       <div data-k="ownerBox">${ownerField()}</div>
       <div class="bottom" data-k="selBtns"></div>`;
   },
@@ -825,6 +836,10 @@ function renderStage2(scr, s) {
   }
   if (scr === 'selResult') {
     setHtml('selRes', measResultHtml(s));
+    // 詳細は本体が結果のときに 1 回送ってくる。途中からつないだなどで無ければ頼む(3 秒に 1 回まで)
+    const d = st.measDetail && st.measDetail.no === s.sel_no ? st.measDetail : null;
+    setHtml('selDet', measDetailHtml(d));
+    if (!d && !st.stale && st.connected && Date.now() - detailAskedAt > 3000) { detailAskedAt = Date.now(); send('sel.detail'); }
     view.querySelector('[data-k="ownerBox"]').hidden = !!s.msaved;   // 保存したあとは変えられない
     // ボタン: 保存前 = 保存 / 終了。保存後 = (再送) / 次を測る / 終了
     const btns = view.querySelector('[data-k="selBtns"]');
@@ -983,7 +998,7 @@ const demo = {
       checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12,
       run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0,
       tire: demo.spd.tire, gear: GEARS_X10[demo.spd.gi], gi: demo.spd.gi, smot: demo.spd.smot, smax: demo.spd.smax,
-      mload: null, mnl: null, mw: null, mrank: 0, mtotal: 0, msaved: 0, mup: 0, owner: demo.meas.owner };
+      mload: null, ml: null, mh: null, mrank: 0, mtotal: 0, msaved: 0, mup: 0, owner: demo.meas.owner };
     const set = {
       0: {}, 1: { label: 'READY', v: 2.41 }, 2: { label: 'READY', v: 2.41, detect_s: 3 },
       3: { label: 'CHARGE', v: 2.63, i: 1.24, mah: 312, elapsed_s: 754 }, 4: { label: 'RESULT', mah: 690, elapsed_s: 1830 },
@@ -994,8 +1009,8 @@ const demo = {
       13: { label: '手動運転', run: 0, v: 0.02 }, 14: { label: '手動運転 回転中', run: 2, live: 32480, v: 2.98, i: 1.12, elapsed_s: 222 },
       15: { label: '計測　番号入力', next_unit: 13 }, 16: { label: '計測 No.13', prompt: 'セレクターを付けてください(負荷 10秒)', live: 28910, sel_no: 13 },
       17: { label: '計測 No.13', live: 28880, sel_no: 13 }, 18: { label: '計測 No.13 測れませんでした', sel_no: 13 },
-      19: { label: '計測　結果', sel_no: 13, mload: 15234, mnl: 17610, mw: 6.12, mrank: 3, mtotal: 12, msaved: demo.meas.saved, mup: demo.meas.up,
-        mreq: demo.meas.up === 3 ? demo.meas.req : 0, mkey: 'single__ハイパーダッシュ', mdate: '2026-11-10' },
+      19: { label: '計測　結果', sel_no: 13, mload: 15820, ml: 16340, mh: 15300, mrank: 3, mtotal: 12, msaved: demo.meas.saved, mup: demo.meas.up,
+        mreq2: demo.meas.up === 3 ? demo.meas.req : 0, mkey: 'single__ハイパーダッシュ', mdate: '2026-11-10' },
       20: { label: '計測　一覧' },
       21: { phase: 14, label: '手動運転 一時停止', run: 3, live: 32100, v: 0, elapsed_s: 240 },
       22: { phase: 10, label: '冷却中', skip: 1, target: 36000 },
@@ -1011,6 +1026,7 @@ const demo = {
     store.apply(JSON.stringify({ t: 'k', course: 1, rpm: chk }));
     store.apply(this.status(phase));
     if (phase === 15 || phase === 19 || phase === 20) this.units();
+    if (phase === 19) this.detail();
   },
   units() {
     const rows = [
@@ -1019,6 +1035,10 @@ const demo = {
       { no: 2, bi: 1, date: '11/05', nref: 34870, nl: 36010, prev: '前回 10/30 より -0.8%', pt: 2, life: '寿命 22%', lt: 2, ba: '', flags: '' },
     ];
     rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'u', i, n: rows.length, ...r })));
+  },
+  detail() {
+    store.apply(JSON.stringify({ t: 'md', no: 13, l23: [13420, 1.85, 2.30], l: [16340, 2.30, 2.56], h: [15300, 2.95, 2.49],
+      nl: [41200, 0.42, 3.00], lcv: 0.008, hcv: 0.011, wf: 0 }));
   },
 };
 
@@ -1033,6 +1053,7 @@ function demoCommand(id, op, arg) {
     if (op === 'sel.owner') demo.meas.owner = arg || '';
     if (op === 'sel.save') { demo.meas.saved = 1; demo.meas.up = 3; demo.meas.req++; }   // 送信中 → ページが送って sel.uploaded
     if (op === 'sel.uploaded') demo.meas.up = arg;
+    if (op === 'sel.detail') demo.detail();
     if (op === 'sel.start' || op === 'sel.input') { demo.meas.saved = 0; demo.meas.up = 0; }
     const go = { app: [0, 1, 6, 24][arg], 'bat.cancel': 1, stop: p >= 13 ? 6 : p >= 9 ? 12 : p >= 6 ? 6 : 1, 'err.clear': 1,
       close: p === 4 ? 1 : 6, next: p === 16 ? 17 : 10, retry: p === 18 ? 16 : 9, 'crs.start': 9,

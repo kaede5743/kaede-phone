@@ -119,3 +119,7 @@ dialog p { font-size: 17px; font-weight: 700; margin: 0 0 14px; white-space: pre
 /* スピードマネージャー: ギヤ比 5 つ */
 .chips.five { grid-template-columns: repeat(5, 1fr); }
 .note b { color: var(--ink); font-variant-numeric: tabular-nums; }
+/* 計測の詳細(開いたり閉じたり。中身は select.js の measDetailHtml) */
+.det { margin: 8px 0; }
+.det > summary { cursor: pointer; color: var(--sub); font-size: 14px; padding: 6px 0; }
+.det .row b { font-variant-numeric: tabular-nums; }
