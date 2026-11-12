@@ -1010,7 +1010,7 @@ const demo = {
       13: { label: '手動運転', run: 0, v: 0.02 }, 14: { label: '手動運転 回転中', run: 2, live: 32480, v: 2.98, i: 1.12, elapsed_s: 222 },
       15: { label: '計測　番号入力', next_unit: 13 }, 16: { label: '計測 No.13', prompt: 'セレクターを付けて負荷Lにしてください', live: 28910, sel_no: 13 },
       17: { label: '計測 No.13', live: 28880, sel_no: 13 }, 18: { label: '計測 No.13 測れませんでした', sel_no: 13 },
-      19: { label: '計測　結果', sel_no: 13, mload: 15820, ml: 16340, mh: 15300, mrank: 3, mtotal: 12, msaved: demo.meas.saved, mup: demo.meas.up,
+      19: { label: '計測　結果', sel_no: 13, mload: 15820, ml: 16340, mh: 15300, mrank: 3, mtotal: 12, mscore: 80, mbrank: 1, msaved: demo.meas.saved, mup: demo.meas.up,
         mreq2: demo.meas.up === 3 ? demo.meas.req : 0, mkey: 'single__ハイパーダッシュ', mdate: '2026-11-10' },
       20: { label: '計測　一覧' },
       21: { phase: 14, label: '手動運転 一時停止', run: 3, live: 32100, v: 0, elapsed_s: 240 },
@@ -1039,7 +1039,7 @@ const demo = {
   },
   detail() {
     store.apply(JSON.stringify({ t: 'md', no: 13, l23: [13420, 1.85, 2.30], l: [16340, 2.30, 2.56], h: [15300, 2.95, 2.49],
-      nl: [41200, 0.42, 3.00], lcv: 0.008, hcv: 0.011, wf: 0 }));
+      nl: [41200, 0.42, 3.00], lcv: 0.008, hcv: 0.011, ps: [100, 50, 50, 100], wf: 0 }));
   },
 };
 

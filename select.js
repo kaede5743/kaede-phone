@@ -64,10 +64,18 @@ export function measResultHtml(s) {
     saved = `<p class="note ${cls}">${esc(UPLOAD_TEXT[s.mup] || '')}</p>`;
   }
   const drop = pos(s.ml) && pos(s.mh) ? `${Math.round((s.mh / s.ml) * 100)}%` : '—';
+  // 総合(速さ 50・粘り 20・効率 20・安定性 10)の順位と点。値は本体が出したもの
+  const hasBal = s.mbrank > 0 && typeof s.mscore === 'number';
+  const brank = hasBal ? `${s.mbrank}<small> 位 / ${s.mtotal} 本</small>` : '—';
+  const bscore = hasBal ? `${s.mscore} 点` : '—';
+  const rrank = s.mrank > 0 ? `<p class="note">回転数 ${s.mrank} 位 / ${s.mtotal} 本</p>` : '';
   return `${note}<p class="h">${s.sel_no} 番</p>
     <div class="grid">
+      <div class="cell"><b>${brank}</b><span>総合(SD の記録の中で)</span></div>
+      <div class="cell"><b>${bscore}</b><span>総合点(速さ・粘り・効率・安定性)</span></div>
+    </div>${rrank}
+    <div class="grid">
       <div class="cell"><b>${num(s.mload)}</b><span>負荷時回転数 rpm(L と H の平均)</span></div>
-      <div class="cell"><b>${rank}</b><span>SD の記録の中で(負荷時)</span></div>
       <div class="cell"><b>${num(s.ml)}</b><span>負荷L rpm</span></div>
       <div class="cell"><b>${num(s.mh)}</b><span>負荷H rpm</span></div>
       <div class="cell"><b>${drop}</b><span>落ち率(H ÷ L)</span></div>
@@ -87,6 +95,13 @@ export function measWarnText(wf) {
 // 安定性(本体の measGrade と同じ境目: 〇 1% 未満・△ 3% 未満・×)
 const grade = (cv) => (!pos(cv) ? '' : cv < 0.01 ? '<span class="up">〇</span>' : cv < 0.03 ? '△' : '<span class="warn">×</span>');
 
+// 総合点の項目ごとの点(本体の詳細 ps: 速さ・粘り・効率・安定性 0〜100)。無ければ出さない
+function partsHtml(ps) {
+  if (!Array.isArray(ps) || !ps.every((x) => typeof x === 'number')) return '';
+  const [a, b, c, e] = ps;
+  return `<p class="note">総合点の内訳(同じ機種の中の位置): 速さ ${a}・粘り ${b}・効率 ${c}・安定 ${e}</p>`;
+}
+
 // 詳細: 段ごとの電圧・電流・回転数、伸び(rpm/V)・落ち率、消費電力、「？」の理由
 export function measDetailHtml(d) {
   if (!d) return '<p class="note">詳細を受け取っています</p>';
@@ -105,6 +120,7 @@ export function measDetailHtml(d) {
       <div class="cell"><b>${w(d.l)}</b><span>消費電力 L</span></div>
       <div class="cell"><b>${w(d.h)}</b><span>消費電力 H</span></div>
     </div>
+    ${partsHtml(d.ps)}
     <p class="note${d.wf ? ' warn' : ''}">${esc(measWarnText(d.wf))}</p>`;
 }
 

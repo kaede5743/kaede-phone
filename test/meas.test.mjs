@@ -15,10 +15,32 @@ test('結果: 負荷時回転数(平均)・負荷L・負荷H・落ち率・順�
   assert.match(h, /16,340/);
   assert.match(h, /15,300/);
   assert.match(h, /94%/);
-  assert.match(h, /3<small> 位 \/ 18 本/);
+  assert.match(h, /回転数 3 位 \/ 18 本/);
   assert.doesNotMatch(h, /無負荷回転数|消費電力/);
   // 片方が無ければ落ち率は —
   assert.doesNotMatch(measResultHtml({ ...s, mh: null }), /\d+%/);
+});
+
+test('結果: 総合の順位と点を大きく、回転数の順位を小さく', () => {
+  const h = measResultHtml({ ...s, mscore: 80, mbrank: 1 });
+  assert.match(h, /総合/);
+  assert.match(h, /1<small> 位 \/ 18 本/);
+  assert.match(h, /80 点/);
+  assert.match(h, /回転数 3 位/);
+  // 総合が出せないとき(本体が null)は —、回転数の順位はそのまま
+  const n = measResultHtml({ ...s, mscore: null, mbrank: 0 });
+  assert.match(n, /総合[\s\S]*—/);
+  assert.match(n, /回転数 3 位/);
+});
+
+test('詳細: 総合点の項目ごとの点。無ければ出さない', () => {
+  const h = measDetailHtml({ ...d, ps: [100, 50, 50, 100] });
+  assert.match(h, /速さ 100/);
+  assert.match(h, /粘り 50/);
+  assert.match(h, /効率 50/);
+  assert.match(h, /安定 100/);
+  assert.doesNotMatch(measDetailHtml(d), /速さ \d/);
+  assert.doesNotMatch(measDetailHtml({ ...d, ps: [null, null, null, null] }), /速さ \d/);
 });
 
 test('詳細: 段ごとの値・伸び・電力・安定性・「？」', () => {
