@@ -504,7 +504,8 @@ const SCREENS = {
       <label class="row"><span>番号</span><input class="act" inputmode="numeric" data-f="selNo" aria-label="個体の番号"></label>
       <p class="note" data-k="selNoNote"></p>
       ${ownerField()}
-      <p class="note">負荷(セレクター付き 2.8V・105mΩ)10 秒 → 無負荷(3.0V)10 秒</p>
+      <p class="note">セレクターを付けて負荷L: カーボン飛ばし 5 秒 → 2.3V 10 秒 → 2.8V・105mΩ 10 秒<br>
+        → 負荷H に切り替えて 2.8V・105mΩ 10 秒 → 外して無負荷(3.0V)10 秒(上限 5A)</p>
       <div class="bottom">
         <button class="btn go act" data-act="selStart">測定開始(モーターが回ります)</button>
         <button class="btn sub act" data-cmd="mot.home">戻る</button>
@@ -913,7 +914,7 @@ view.addEventListener('click', async (e) => {
       const no = parseInt(view.querySelector('[data-f="selNo"]').value, 10);
       if (!(no >= 1 && no <= 999)) { toast('個体の番号は 1〜999 で入れてください'); return; }
       const owner = s?.owner || '';
-      if (await ask(`${no} 番(所有者: ${owner || '未入力'})を測ります。\nセレクターを付けて負荷 10 秒 → 外して無負荷 10 秒。本体の案内に従ってください。`, '測る')) {
+      if (await ask(`${no} 番(所有者: ${owner || '未入力'})を測ります。\nセレクターを付けて負荷L(2.3V・2.8V 各 10 秒)→ 負荷H に切り替えて 10 秒 → 外して無負荷 10 秒。本体の案内に従ってください。`, '測る')) {
         send('sel.start', no);
       }
       break;
@@ -1007,7 +1008,7 @@ const demo = {
       10: { label: '慣らし', rpm: 15980, live: 16020, target: 36000, elapsed_s: 4321, max_s: 21600, checks: 1, checks_max: 6, v: 1.5, i: 0.63 },
       11: { label: '測れませんでした' }, 12: { label: '結果', rpm: 36210, target: 36000, elapsed_s: 14400, max_s: 21600, checks: 4, checks_max: 6 },
       13: { label: '手動運転', run: 0, v: 0.02 }, 14: { label: '手動運転 回転中', run: 2, live: 32480, v: 2.98, i: 1.12, elapsed_s: 222 },
-      15: { label: '計測　番号入力', next_unit: 13 }, 16: { label: '計測 No.13', prompt: 'セレクターを付けてください(負荷 10秒)', live: 28910, sel_no: 13 },
+      15: { label: '計測　番号入力', next_unit: 13 }, 16: { label: '計測 No.13', prompt: 'セレクターを付けて負荷Lにしてください', live: 28910, sel_no: 13 },
       17: { label: '計測 No.13', live: 28880, sel_no: 13 }, 18: { label: '計測 No.13 測れませんでした', sel_no: 13 },
       19: { label: '計測　結果', sel_no: 13, mload: 15820, ml: 16340, mh: 15300, mrank: 3, mtotal: 12, msaved: demo.meas.saved, mup: demo.meas.up,
         mreq2: demo.meas.up === 3 ? demo.meas.req : 0, mkey: 'single__ハイパーダッシュ', mdate: '2026-11-10' },
