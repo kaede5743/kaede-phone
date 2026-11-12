@@ -1,6 +1,6 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
 import { LineBuffer, createStore, screenFor, buildCommand, textArgOk, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
-import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, canResend } from './select.js';
+import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, refCommandText, canResend } from './select.js';
 
 const SVC = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b01';
 const RX  = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b02';   // ページ → 本体
@@ -271,6 +271,7 @@ const DEL_SENT_STORE = 'kaede_phone_del_sent';
 const DEL_PHASES = [PHASE.MOT_IDLE, PHASE.SEL_INPUT, PHASE.SEL_RESULT];   // 本体が受け付ける画面(回っていない)
 const DEL_REFETCH_MS = 3 * 60 * 1000;
 let delFetchedFor = '';   // 最後に受け取った機種(つなぎ直したら空に戻す)
+let refSentFor = {};       // 機種ごとに本体へ送った総合点の基準の文字(つなぎ直したら空に戻す)
 let delFetchedAt = 0;
 let delBusy = false;
 function delSent() { try { const o = JSON.parse(localStorage.getItem(DEL_SENT_STORE) || '{}'); return o && typeof o === 'object' ? o : {}; } catch { return {}; } }
@@ -288,6 +289,12 @@ async function syncDeleted(s) {
     const data = await res.json();
     delFetchedFor = mkey;
     delFetchedAt = Date.now();
+    // 総合点の基準(モーターラボで機種ごとに決めたもの)を本体へ。前に送った値と同じなら送らない
+    // (つなぎ直すと送り直す。本体も同じ値なら何もしない)
+    if (st.status?.mkey === mkey && 'refs' in data) {
+      const rt = refCommandText(data.refs);
+      if (refSentFor[mkey] !== rt) send('sel.ref', rt, true, () => { refSentFor[mkey] = rt; });
+    }
     const sent = delSent();
     const done = new Set(Array.isArray(sent[mkey]) ? sent[mkey] : []);
     for (const q of queue) if (q.op === 'sel.del') done.add(q.arg);   // 送っている途中の印は重ねない
@@ -775,7 +782,7 @@ function render() {
 }
 let wasConnected = false;
 store.onChange = () => {
-  if (st.connected !== wasConnected) { wasConnected = st.connected; delFetchedFor = ''; }   // つなぎ直したら受け取り直す
+  if (st.connected !== wasConnected) { wasConnected = st.connected; delFetchedFor = ''; refSentFor = {}; }   // つなぎ直したら受け取り直す
   render();
   labUploadIfRequested(st.status);
   syncDeleted(st.status);
@@ -1010,7 +1017,7 @@ const demo = {
       13: { label: '手動運転', run: 0, v: 0.02 }, 14: { label: '手動運転 回転中', run: 2, live: 32480, v: 2.98, i: 1.12, elapsed_s: 222 },
       15: { label: '計測　番号入力', next_unit: 13 }, 16: { label: '計測 No.13', prompt: 'セレクターを付けて負荷Lにしてください', live: 28910, sel_no: 13 },
       17: { label: '計測 No.13', live: 28880, sel_no: 13 }, 18: { label: '計測 No.13 測れませんでした', sel_no: 13 },
-      19: { label: '計測　結果', sel_no: 13, mload: 15820, ml: 16340, mh: 15300, mrank: 3, mtotal: 12, mscore: 80, mbrank: 1, msaved: demo.meas.saved, mup: demo.meas.up,
+      19: { label: '計測　結果', sel_no: 13, mload: 15820, ml: 16340, mh: 15300, mrank: 3, mtotal: 12, mscore: 80, mbrank: 1, mref: 1, msaved: demo.meas.saved, mup: demo.meas.up,
         mreq2: demo.meas.up === 3 ? demo.meas.req : 0, mkey: 'single__ハイパーダッシュ', mdate: '2026-11-10' },
       20: { label: '計測　一覧' },
       21: { phase: 14, label: '手動運転 一時停止', run: 3, live: 32100, v: 0, elapsed_s: 240 },
