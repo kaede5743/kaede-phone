@@ -64,11 +64,12 @@ export function measResultHtml(s) {
     saved = `<p class="note ${cls}">${esc(UPLOAD_TEXT[s.mup] || '')}</p>`;
   }
   const drop = pos(s.ml) && pos(s.mh) ? `${Math.round((s.mh / s.ml) * 100)}%` : '—';
-  // 総合(速さ 50・粘り 20・効率 20・安定性 10)の順位と点。値は本体が出したもの
+  // 総合(速さ 50・粘り 20・効率 20・安定性 10、基準に対する個体ごとの点)の順位と点。値は本体が出したもの
   const hasBal = s.mbrank > 0 && typeof s.mscore === 'number';
   const brank = hasBal ? `${s.mbrank}<small> 位 / ${s.mtotal} 本</small>` : '—';
-  const bscore = hasBal ? `${s.mscore} 点` : '—';
-  const rrank = s.mrank > 0 ? `<p class="note">回転数 ${s.mrank} 位 / ${s.mtotal} 本</p>` : '';
+  const bscore = typeof s.mscore === 'number' ? `${s.mscore} 点` : '—';
+  const noRef = s.mref === 0 ? '<p class="note">総合: 基準が未設定(モーターラボで機種ごとに入れる)</p>' : '';
+  const rrank = (s.mrank > 0 ? `<p class="note">回転数 ${s.mrank} 位 / ${s.mtotal} 本</p>` : '') + noRef;
   return `${note}<p class="h">${s.sel_no} 番</p>
     <div class="grid">
       <div class="cell"><b>${brank}</b><span>総合(SD の記録の中で)</span></div>
@@ -95,11 +96,21 @@ export function measWarnText(wf) {
 // 安定性(本体の measGrade と同じ境目: 〇 1% 未満・△ 3% 未満・×)
 const grade = (cv) => (!pos(cv) ? '' : cv < 0.01 ? '<span class="up">〇</span>' : cv < 0.03 ? '△' : '<span class="warn">×</span>');
 
+// 総合点の基準(受け口の refs: 速さ・効率の 0 点と満点)を本体へ送る文字 "14000|18000|2000|3000"。
+// 本体(measRefOk)と同じ範囲のものだけ。無い・不正なら ''(本体の基準を消す)
+export function refCommandText(r) {
+  if (!r || typeof r !== 'object') return '';
+  const int = (v, max) => (typeof v === 'number' && Number.isFinite(v) && v >= 1 && v <= max ? Math.round(v) : null);
+  const a = [int(r.rpmLo, 200000), int(r.rpmHi, 200000), int(r.effLo, 65535), int(r.effHi, 65535)];
+  if (a.some((v) => v === null) || a[0] >= a[1] || a[2] >= a[3]) return '';
+  return a.join('|');
+}
+
 // 総合点の項目ごとの点(本体の詳細 ps: 速さ・粘り・効率・安定性 0〜100)。無ければ出さない
 function partsHtml(ps) {
   if (!Array.isArray(ps) || !ps.every((x) => typeof x === 'number')) return '';
   const [a, b, c, e] = ps;
-  return `<p class="note">総合点の内訳(同じ機種の中の位置): 速さ ${a}・粘り ${b}・効率 ${c}・安定 ${e}</p>`;
+  return `<p class="note">総合点の内訳(基準に対する点): 速さ ${a}・粘り ${b}・効率 ${c}・安定 ${e}</p>`;
 }
 
 // 詳細: 段ごとの電圧・電流・回転数、伸び(rpm/V)・落ち率、消費電力、「？」の理由

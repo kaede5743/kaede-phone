@@ -1,7 +1,7 @@
 // 計測(負荷L・H の2点)の結果・詳細・モーターラボへの本文のテスト。node --test test/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { measResultHtml, measDetailHtml, measLabBody, measWarnText } from '../select.js';
+import { measResultHtml, measDetailHtml, measLabBody, measWarnText, refCommandText } from '../select.js';
 import { createStore } from '../proto.js';
 
 const s = { sel_no: 12, mload: 15820, ml: 16340, mh: 15300, mrank: 3, mtotal: 18, msaved: 0, mup: 0,
@@ -31,6 +31,17 @@ test('結果: 総合の順位と点を大きく、回転数の順位を小さく
   const n = measResultHtml({ ...s, mscore: null, mbrank: 0 });
   assert.match(n, /総合[\s\S]*—/);
   assert.match(n, /回転数 3 位/);
+  // 基準が本体に無い(mref 0)ときはその理由を出す。ある(mref 1)なら出さない
+  assert.match(measResultHtml({ ...s, mscore: null, mbrank: 0, mref: 0 }), /基準が未設定/);
+  assert.doesNotMatch(measResultHtml({ ...s, mscore: 54, mbrank: 2, mref: 1 }), /基準が未設定/);
+});
+
+test('総合点の基準を本体へ送る文字(sel.ref)', () => {
+  assert.equal(refCommandText({ rpmLo: 14000, rpmHi: 18000, effLo: 2000, effHi: 3000 }), '14000|18000|2000|3000');
+  assert.equal(refCommandText(null), '');
+  assert.equal(refCommandText({ rpmLo: 18000, rpmHi: 14000, effLo: 2000, effHi: 3000 }), '');   // 0 点 ≥ 満点
+  assert.equal(refCommandText({ rpmLo: 14000, rpmHi: 18000, effLo: 2000 }), '');                // 足りない
+  assert.equal(refCommandText({ rpmLo: 14000.4, rpmHi: 18000, effLo: 2000, effHi: 3000 }), '14000|18000|2000|3000');
 });
 
 test('詳細: 総合点の項目ごとの点。無ければ出さない', () => {
