@@ -78,6 +78,7 @@ export function createStore() {
     onChange: null,        // () => void
     onQueue: null,         // (m) => void  あとから送信: 本体が渡した未送信の計測 {"t":"q"}
     onQueueDone: null,     // () => void   あとから送信: 渡すものが無くなった {"t":"qd"}
+    onHello: null,         // () => void   本体の hello(つないだ直後。時計合わせを送る)
     apply(line) {
       let m;
       try { m = JSON.parse(line); } catch { return false; }
@@ -115,6 +116,7 @@ export function createStore() {
           break;
         case 'hello':
           state.versionOk = m.v === PROTO_VERSION;
+          if (store.onHello) store.onHello();
           break;
         default:
           return false;
