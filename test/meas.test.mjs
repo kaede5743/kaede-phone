@@ -97,3 +97,14 @@ test('{"t":"md"} を受け取って持つ。番号が数でなければ捨てる
   assert.equal(st.apply(JSON.stringify({ t: 'md', no: 'x' })), false);
   assert.equal(st.state.measDetail.no, 12);
 });
+
+test('つないだあと状態が届いたかを数える(届かなければページがつなぎ直す)', () => {
+  const store = createStore();
+  store.markConnected();
+  assert.equal(store.state.statusSeq, 0);
+  store.apply('{"t":"l","live":100}');   // 状態の前の回転数だけでは数えない
+  assert.equal(store.state.statusSeq, 0);
+  store.apply('{"t":"s","phase":10}');
+  store.apply('{"t":"s","phase":10}');
+  assert.equal(store.state.statusSeq, 2);
+});
