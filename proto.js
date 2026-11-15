@@ -64,6 +64,7 @@ export function createStore() {
   const state = {
     connected: false,
     stale: false,          // 切れたあと、新しい状態がまだ届いていない
+    statusSeq: 0,          // 状態 {"t":"s"} が届いた回数(つないだあと届いているかを見る)
     status: null,
     config: null,
     history: { course: null, rpm: [], i: [] },
@@ -83,6 +84,7 @@ export function createStore() {
       switch (m.t) {
         case 's':
           state.status = m;
+          state.statusSeq++;
           state.stale = !state.connected;
           break;
         case 'l':   // 今の回転数だけ。状態が届く前は捨てる

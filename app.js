@@ -69,13 +69,18 @@ let decoder = new TextDecoder();
 
 async function connectTap() {
   if (!navigator.bluetooth) return;
+  let chosen;
   try {
-    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    chosen = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
   } catch (e) {
     return;   // 選ばずに閉じた
   }
+  // 選び直したときは前の本体の監視を外す
+  if (device && device !== chosen) { device.removeEventListener('gattserverdisconnected', onDisconnected); try { device.gatt.disconnect(); } catch {} }
+  device = chosen;
   device.addEventListener('gattserverdisconnected', onDisconnected);
   retryMs = 0;
+  render();
   await openLink();
 }
 
@@ -88,25 +93,47 @@ async function openLink() {
   setConn('retry', 'つないでいます…');
   try {
     const server = await withTimeout(device.gatt.connect(), 15000);
-    const svc = await server.getPrimaryService(SVC);
-    rxChar = await svc.getCharacteristic(RX);
-    const tx = await svc.getCharacteristic(TX);
+    // どこかで止まったまま返ってこないと、ずっと「接続する」の画面のままになるので、それぞれに時間の上限を付ける
+    const svc = await withTimeout(server.getPrimaryService(SVC), 10000);
+    rxChar = await withTimeout(svc.getCharacteristic(RX), 10000);
+    const tx = await withTimeout(svc.getCharacteristic(TX), 10000);
     lineBuf = new LineBuffer();
     decoder = new TextDecoder();
-    tx.addEventListener('characteristicvaluechanged', (e) => {
-      const text = decoder.decode(e.target.value, { stream: true });
-      for (const line of lineBuf.push(text)) store.apply(line);
-    });
-    await tx.startNotifications();   // ここで初回はペアリング(本体に出た 6 桁を入れる)
+    // つなぎ直しで同じ物が返っても受け取りが二重にならないように、同じ関数を付け直す
+    tx.removeEventListener('characteristicvaluechanged', onTxValue);
+    tx.addEventListener('characteristicvaluechanged', onTxValue);
+    // ここで初回はペアリング(本体に出た 6 桁を入れる)。番号を入れる時間があるので長めに待つ
+    await withTimeout(tx.startNotifications(), 60000);
     retryMs = 0;
     store.markConnected();
+    watchStatus();
   } catch (e) {
     try { device.gatt.disconnect(); } catch {}
     scheduleRetry();
   }
 }
 
+// つないだのに本体の状態が届かないとき(本体の操作の途中からつないだときなど)は、つなぎ直して本体に送り直してもらう。
+// 本体は 1 秒ごとに状態を送るので、5 秒届かなければおかしい
+const STATUS_WAIT_MS = 5000;
+let statusTimer = null;
+function watchStatus() {
+  clearTimeout(statusTimer);
+  const seq = st.statusSeq;
+  statusTimer = setTimeout(() => {
+    if (!st.connected || st.statusSeq !== seq || !device) return;
+    console.warn('本体の状態が届かないので、つなぎ直します');
+    try { device.gatt.disconnect(); } catch {}   // gattserverdisconnected → onDisconnected → つなぎ直す
+  }, STATUS_WAIT_MS);
+}
+
+function onTxValue(e) {
+  const text = decoder.decode(e.target.value, { stream: true });
+  for (const line of lineBuf.push(text)) store.apply(line);
+}
+
 function onDisconnected() {
+  clearTimeout(statusTimer);
   rxChar = null;
   if (pending) { clearTimeout(pending.timer); pending = null; }
   queue.length = 0;
@@ -326,7 +353,11 @@ const SCREENS = {
       return `<p class="h">このブラウザでは使えません</p><p class="note">Android の Chrome で開いてください。</p>`;
     }
     return `<p class="h">本体とつなぐ</p>
-      <p class="note">KaedeSystem の電源を入れて、近くで「接続する」を押してください。初めてのときは本体に出る 6 桁の番号をスマホに入れます。</p>
+      <div data-k="connWait" hidden>
+        <p class="say" data-k="connWaitText"></p>
+        <p class="note">本体の操作の途中でもつなげます。しばらく出ないときは、本体の近くで待つか、もう一度「接続する」を押してください。</p>
+      </div>
+      <p class="note" data-k="connHelp">KaedeSystem の電源を入れて、近くで「接続する」を押してください。初めてのときは本体に出る 6 桁の番号をスマホに入れます。</p>
       <div class="bottom"><button class="btn go" data-act="connect">接続する</button></div>`;
   },
   selector() {
@@ -726,6 +757,16 @@ function render() {
   }
   if (st.connected) setConn('on', '接続中');
   else if (!device && !DEMO) setConn('', '未接続');
+
+  if (scr === 'connect') {
+    // 本体を選んだあと: 「接続する」だけの画面のままにせず、今どこまで進んだかを出す
+    const box = view.querySelector('[data-k="connWait"]');
+    if (box) {
+      box.hidden = !device;
+      view.querySelector('[data-k="connHelp"]').hidden = !!device;
+      setK('connWaitText', st.connected ? '本体の画面を受け取っています…' : 'つないでいます…');
+    }
+  }
 
   if (!s) return;
   setK('label', s.label || '');
