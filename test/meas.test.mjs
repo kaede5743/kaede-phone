@@ -137,3 +137,27 @@ test('store calls onQueue and onQueueDone', () => {
   assert.deepEqual(got, [1]);
   assert.equal(done, 1);
 });
+
+import { clockText } from '../select.js';
+import { buildCommand } from '../proto.js';
+
+test('clockText: スマホの今の日時を本体の time の形に(その端末の時刻)', () => {
+  assert.equal(clockText(new Date(2026, 10, 16, 4, 30, 5)), '2026-11-16 04:30:05');
+  assert.equal(clockText(new Date(2027, 0, 2, 23, 9, 0)), '2027-01-02 23:09:00');
+  assert.equal(buildCommand(7, 'time', clockText(new Date(2026, 10, 16, 4, 30, 5))), '7 time 2026-11-16 04:30:05\n');
+});
+
+test('queueLabBody keeps noDate for rows without a clock', () => {
+  const b = queueLabBody({ t: 'q', id: 2, motor: 'single__ノーマル', no: '005', date: '', noDate: true, rpm: 21914 }, 'K');
+  assert.equal(b.noDate, true);
+  assert.equal(b.date, '');
+  assert.equal(b.key, 'K');
+});
+
+test('store calls onHello', () => {
+  const st = createStore();
+  let n = 0;
+  st.onHello = () => { n++; };
+  st.apply('{"t":"hello","v":1}');
+  assert.equal(n, 1);
+});

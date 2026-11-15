@@ -1,6 +1,6 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
 import { LineBuffer, createStore, screenFor, buildCommand, textArgOk, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
-import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, refCommandText, canResend, queueLabBody, labCodeOf, backfillToast } from './select.js';
+import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, refCommandText, canResend, queueLabBody, labCodeOf, backfillToast, clockText } from './select.js';
 
 const SVC = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b01';
 const RX  = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b02';   // ページ → 本体
@@ -289,6 +289,8 @@ store.onQueue = async (q) => {
   if (code === 9) bfBad++;
   done(code);
 };
+// 本体の時計はスマホの今の日時で合わせる(本体には時計を合わせる手段がほかに無く、記録の日付が ---- になるため)
+store.onHello = () => { send('time', clockText(new Date()), true); };
 store.onQueueDone = () => {
   const text = backfillToast(bfSent, bfBad);
   bfSent = 0; bfBad = 0;

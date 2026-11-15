@@ -169,3 +169,9 @@ export function backfillToast(sent, bad) {
   if (sent > 0) return bad > 0 ? `未送信 ${sent} 件を送りました(送れなかった ${bad} 件)` : `未送信 ${sent} 件を送りました`;
   return bad > 0 ? `送れなかった ${bad} 件` : '';
 }
+
+// 本体の時計合わせ(time)に送る今の日時 "2026-11-16 04:30:05"(この端末の時刻)
+export function clockText(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
