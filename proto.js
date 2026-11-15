@@ -76,10 +76,14 @@ export function createStore() {
     state,
     onReply: null,         // (id, res) => void
     onChange: null,        // () => void
+    onQueue: null,         // (m) => void  あとから送信: 本体が渡した未送信の計測 {"t":"q"}
+    onQueueDone: null,     // () => void   あとから送信: 渡すものが無くなった {"t":"qd"}
     apply(line) {
       let m;
       try { m = JSON.parse(line); } catch { return false; }
       if (!m || typeof m !== 'object' || Array.isArray(m)) return false;
+      if (m.t === 'q') { if (store.onQueue) store.onQueue(m); return true; }        // 画面は変えない
+      if (m.t === 'qd') { if (store.onQueueDone) store.onQueueDone(); return true; }
       switch (m.t) {
         case 's':
           state.status = m;

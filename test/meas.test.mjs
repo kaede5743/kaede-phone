@@ -97,3 +97,43 @@ test('{"t":"md"} を受け取って持つ。番号が数でなければ捨てる
   assert.equal(st.apply(JSON.stringify({ t: 'md', no: 'x' })), false);
   assert.equal(st.state.measDetail.no, 12);
 });
+
+// ===== あとから送信 =====
+import { queueLabBody, labCodeOf, backfillToast } from '../select.js';
+
+test('queueLabBody keeps fields and adds key', () => {
+  const q = { t: 'q', id: 3, motor: 'single__ハイパーダッシュ', no: '012', ver: 2, rpm: 15234 };
+  assert.deepEqual(queueLabBody(q, 'K'), { key: 'K', motor: 'single__ハイパーダッシュ', no: '012', ver: 2, rpm: 15234 });
+  assert.equal(queueLabBody({ ...q, id: 0 }, 'K'), null);
+  assert.equal(queueLabBody({ t: 'q', id: 3 }, 'K'), null);
+});
+
+test('labCodeOf maps statuses', () => {
+  assert.equal(labCodeOf(200, { ok: true, already: true }), 8);
+  assert.equal(labCodeOf(200, { ok: true }), 1);
+  assert.equal(labCodeOf(400, {}), 9);
+  assert.equal(labCodeOf(403, {}), 4);
+  assert.equal(labCodeOf(401, {}), 4);
+  assert.equal(labCodeOf(409, {}), 6);
+  assert.equal(labCodeOf(500, {}), 5);
+  assert.equal(labCodeOf(0, null), 5);
+});
+
+test('backfillToast', () => {
+  assert.equal(backfillToast(3, 0), '未送信 3 件を送りました');
+  assert.equal(backfillToast(2, 1), '未送信 2 件を送りました(送れなかった 1 件)');
+  assert.equal(backfillToast(0, 2), '送れなかった 2 件');
+  assert.equal(backfillToast(0, 0), '');
+});
+
+test('store calls onQueue and onQueueDone', () => {
+  const st = createStore();
+  const got = [];
+  let done = 0;
+  st.onQueue = (m) => got.push(m.id);
+  st.onQueueDone = () => { done++; };
+  assert.equal(st.apply('{"t":"q","id":1}'), true);
+  assert.equal(st.apply('{"t":"qd"}'), true);
+  assert.deepEqual(got, [1]);
+  assert.equal(done, 1);
+});

@@ -1,6 +1,6 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
 import { LineBuffer, createStore, screenFor, buildCommand, textArgOk, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
-import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, refCommandText, canResend } from './select.js';
+import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, refCommandText, canResend, queueLabBody, labCodeOf, backfillToast } from './select.js';
 
 const SVC = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b01';
 const RX  = '5f3a9c10-7d2e-4b8a-9e61-2c4d8f0a1b02';   // ページ → 本体
@@ -110,6 +110,7 @@ function onDisconnected() {
   rxChar = null;
   if (pending) { clearTimeout(pending.timer); pending = null; }
   queue.length = 0;
+  bfSent = 0; bfBad = 0;
   store.markDisconnected();
   scheduleRetry();
 }
@@ -262,6 +263,37 @@ async function labUploadIfRequested(s) {
   }
   send('sel.uploaded', code);
 }
+
+// ===== あとから送信: 本体が渡す未送信の計測({"t":"q"})を 1 件ずつ送り、結果を lab.done で返す =====
+// 本体は返事が来てから次を渡す。渡すものが無くなると {"t":"qd"} が来るので、そこで件数を出す
+let bfSent = 0, bfBad = 0;
+store.onQueue = async (q) => {
+  if (!Number.isInteger(q.id) || q.id < 1 || q.id > 65535) return;
+  const done = (code) => send('lab.done', `${q.id}|${code}`, true);
+  const key = labKey();
+  if (!key) { done(7); return; }
+  const body = queueLabBody(q, key);
+  if (!body) { done(9); return; }
+  if (DEMO) { setTimeout(() => { bfSent++; done(1); }, 300); return; }
+  let code = 5;
+  try {
+    const res = await fetch(LAB_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    let json = null;
+    try { json = await res.json(); } catch { /* 本文が無くても番号は決まる */ }
+    code = labCodeOf(res.status, json);
+  } catch (e) {
+    console.warn('あとから送信: モーターラボへ送れませんでした', e);
+    code = 5;
+  }
+  if (code === 1) bfSent++;
+  if (code === 9) bfBad++;
+  done(code);
+};
+store.onQueueDone = () => {
+  const text = backfillToast(bfSent, bfBad);
+  bfSent = 0; bfBad = 0;
+  if (text) toast(text);
+};
 
 // ===== モーターラボで消した計測を、本体の記録(順位)からも外す =====
 // 本体が状態に載せる機種のキー(mkey)の分だけ、消した計測の印「番号|計測日|負荷時回転数」を受け口から受け取り、
