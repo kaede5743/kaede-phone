@@ -147,3 +147,25 @@ export function measLabBody(s, d, key) {
     date: s.mdate || '', owner: s.owner || '',
   };
 }
+
+// ===== あとから送信(本体が {"t":"q"} で渡す未送信の計測) =====
+// 本体の行は受け口の本文と同じキーなので、t・id を除いて送信キーを足すだけ。形が違えば null
+export function queueLabBody(q, key) {
+  if (!q || !Number.isInteger(q.id) || q.id < 1 || q.id > 65535 || typeof q.motor !== 'string') return null;
+  const { t, id, ...rest } = q;
+  return { key, ...rest };
+}
+
+// 受け口の返事を本体の結果の番号に: 1=登録 4=キー違い 5=失敗 6=受け口が準備できていない 8=登録済み 9=受け付けない行
+export function labCodeOf(status, json) {
+  if (status === 200) return json && json.already ? 8 : 1;
+  if (status === 400) return 9;
+  if (status === 401 || status === 403) return 4;
+  if (status === 409) return 6;
+  return 5;
+}
+
+export function backfillToast(sent, bad) {
+  if (sent > 0) return bad > 0 ? `未送信 ${sent} 件を送りました(送れなかった ${bad} 件)` : `未送信 ${sent} 件を送りました`;
+  return bad > 0 ? `送れなかった ${bad} 件` : '';
+}
