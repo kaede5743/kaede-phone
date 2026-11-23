@@ -370,7 +370,9 @@ const SCREENS = {
       <button class="btn go appbig act" data-cmd="app" data-arg="3">Speed Manager</button>`;
   },
   batSetup() {
-    const chips = PRESETS.map((v, k) => `<button class="chip act" data-cmd="bat.preset" data-arg="${k}" data-preset="${k}">${v.toFixed(2)}</button>`).join('');
+    // 3.00V の次の 7 番が満充電(2A で入れて -6mV か 3.45V で止める)
+    const chips = PRESETS.map((v, k) => `<button class="chip act" data-cmd="bat.preset" data-arg="${k}" data-preset="${k}">${v.toFixed(2)}</button>`).join('')
+      + `<button class="chip act" data-cmd="bat.preset" data-arg="${PRESETS.length}" data-full="1">満充電</button>`;
     return `<span class="state" data-k="label"></span>
       <div class="big"><span data-k="v"></span><small>V</small></div>
       <p class="note">電池の電圧(目標は下のボタンで選びます)</p>
@@ -395,7 +397,7 @@ const SCREENS = {
         <div class="cell"><b data-k="elapsed"></b><span>経過</span></div>
         <div class="cell"><b data-k="temp"></b><span>温度 ℃</span></div>
       </div>
-      <p class="note">目標 <span data-k="preset"></span> V</p>
+      <p class="note">目標 <span data-k="preset"></span></p>
       <div class="bottom">
         <div class="pair" data-k="bdoneBox" hidden>
           <button class="btn sub act" data-cmd="bat.finish">直前仕上げ</button>
@@ -767,7 +769,7 @@ function render() {
   setK('i', num(s.i, 2));
   setK('temp', num(s.temp, 1));
   setK('mah', num(s.mah));
-  setK('preset', num(s.preset, 2));
+  setK('preset', s.full ? '満充電' : `${num(s.preset, 2)} V`);
   setK('error', s.error || 'エラー');
   setK('prompt', s.prompt || '本体の案内を見てください');
   setK('rpm', num(s.rpm));
@@ -777,8 +779,11 @@ function render() {
 
   if (scr === 'batSetup') {
     for (const el of view.querySelectorAll('[data-preset]')) {
-      el.classList.toggle('on', Math.abs(PRESETS[+el.dataset.preset] - s.preset) < 0.01);
+      // 満充電を選んでいる間は電圧の段は光らせない(preset は直前の段のまま送られてくる)
+      el.classList.toggle('on', !s.full && Math.abs(PRESETS[+el.dataset.preset] - s.preset) < 0.01);
     }
+    const fullChip = view.querySelector('[data-full]');
+    if (fullChip) fullChip.classList.toggle('on', !!s.full);
     const box = view.querySelector('[data-k="countdownBox"]');
     box.hidden = s.phase !== PHASE.BAT_COUNTDOWN;
     setK('countdown', `あと ${s.detect_s} 秒で充電を始めます`);
@@ -1038,7 +1043,7 @@ const demo = {
   status(phase) {
     const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, target: 0, elapsed_s: 0, max_s: 0, rpm: null, live: null,
       checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12,
-      run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0,
+      run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0, full: 0,
       tire: demo.spd.tire, gear: GEARS_X10[demo.spd.gi], gi: demo.spd.gi, smot: demo.spd.smot, smax: demo.spd.smax,
       mload: null, ml: null, mh: null, mrank: 0, mtotal: 0, msaved: 0, mup: 0, owner: demo.meas.owner };
     const set = {
@@ -1103,7 +1108,11 @@ function demoCommand(id, op, arg) {
       'sel.redo': 16, 'sel.input': 15, 'sel.save': 19, 'sel.uploaded': 19, 'sel.end': 6, 'sel.owner': p, skip: 10, 'bat.finish': 3, 'bat.recheck': 3,
       'spd.tire': p, 'spd.gear': p, 'spd.motor': p, 'spd.clr': p }[op];
     if (go !== undefined) demo.show(go);
-    if (op === 'bat.preset') store.apply(demo.status(demo.phase).replace('"preset":2.8', `"preset":${PRESETS[arg]}`));
+    if (op === 'bat.preset') {
+      store.apply(arg >= PRESETS.length
+        ? demo.status(demo.phase).replace('"full":0', '"full":1')
+        : demo.status(demo.phase).replace('"preset":2.8', `"preset":${PRESETS[arg]}`));
+    }
   }, 150);
 }
 
