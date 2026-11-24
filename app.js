@@ -180,6 +180,7 @@ const stopBtn = (label = '長押しで中止') => `<button class="btn stop act" 
 // 画面ごとに骨組みを 1 回だけ作り、値は data-k の要素だけ書き換える(押している途中のボタンを作り直さない)
 let local = null;              // ページの中だけで開く画面: 'crs' | 'motors' | 'list' | 'd:<番号>'(本体は動かさない)
 let localFor = '';             // local を開いた画面。画面が変わったら閉じる
+let cellNoEdited = false;      // 番号入力の欄をスマホで書きかえたか(書きかえるまでは本体の番号についていく)
 // 計測の所有者の候補(この端末で入れた名前。新しい順に 20 件まで)
 const OWNERS_KEY = 'kaede_phone_owners';
 function loadOwners() {
@@ -849,7 +850,10 @@ function render() {
   }
   if (scr === 'batCellNo') {
     const f = view.querySelector('[data-f="cellNo"]');
-    if (f && f.value === '' && document.activeElement !== f && s.cell_no) f.value = String(s.cell_no);
+    // 本体の A/C で番号を動かしたら欄もついていく(スマホで書きかえたら、その番号を使う)
+    if (f && !cellNoEdited && document.activeElement !== f && s.cell_no) f.value = String(s.cell_no);
+  } else {
+    cellNoEdited = false;
   }
   setK('live', num(s.live));
   setK('mv', num(s.v, 2));
@@ -1067,6 +1071,7 @@ view.addEventListener('change', (e) => {
   const el = e.target;
   const f = el.dataset.f;
   if (!f) return;
+  if (f === 'cellNo') { cellNoEdited = true; return; }
   if (f === 'selNo' || f === 'manV' || f === 'spdTire') { render(); return; }   // 送るのはボタンを押したとき
   if (f === 'owner') {
     const name = el.value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
