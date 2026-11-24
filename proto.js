@@ -9,6 +9,7 @@ export const PHASE = Object.freeze({
   MOT_IDLE: 6, MOT_BUSY: 7, MOT_RUN: 8, CRS_PROMPT: 9, CRS_RUN: 10, CRS_FAIL: 11, CRS_RESULT: 12,
   MAN_IDLE: 13, MAN_RUN: 14, SEL_INPUT: 15, SEL_PROMPT: 16, SEL_RUN: 17, SEL_FAIL: 18, SEL_RESULT: 19, SEL_LIST: 20,
   SPD: 21, SPD_BUSY: 22,
+  BAT_CELLNO: 23,   // 満充電(1本): 電池を見つけて番号を入れている
 });
 
 const SCREEN_OF_PHASE = [
@@ -16,6 +17,7 @@ const SCREEN_OF_PHASE = [
   'motMenu', 'motBusy', 'motBusy', 'prompt', 'run', 'fail', 'result',
   'manual', 'manual', 'selInput', 'selPrompt', 'selRun', 'selFail', 'selResult', 'selList',
   'speed', 'speedBusy',
+  'batCellNo',
 ];
 
 // スピードマネージャー(speed_math.h と同じ値)。ギヤ比は 10 倍、タイヤ径は 0.1mm 単位
@@ -69,6 +71,8 @@ export function createStore() {
     history: { course: null, rpm: [], i: [] },
     checks: { course: null, rpm: [] },   // 3.0V の確認の回転数(測れた回だけ)
     units: { n: 0, rows: [], complete: false },   // 選別の個体の一覧(本体が推定回転数の速い順に送る)
+    cells: { n: 0, rows: [], complete: false },   // 電池の記録(満充電(1本)、番号順) {"t":"cr"}
+    cellPairs: { n: 0, rows: [], complete: false },   // ペアの候補(差の小さい順、先頭がおすすめ) {"t":"cp"}
     measDetail: null,      // 計測の詳細 {"t":"md"}(最後に届いたもの。番号 no で今の結果のものか確かめる)
     versionOk: true,
   };
@@ -102,6 +106,12 @@ export function createStore() {
           break;
         case 'u':
           if (!applyUnit(state.units, m)) return false;
+          break;
+        case 'cr':   // 電池の記録の 1行(個体の一覧と同じ i・n の送り方)
+          if (!applyUnit(state.cells, m)) return false;
+          break;
+        case 'cp':   // ペアの候補の 1行
+          if (!applyUnit(state.cellPairs, m)) return false;
           break;
         case 'md':   // 計測の詳細(結果の画面に入ったときと sel.detail のとき)
           if (typeof m.no !== 'number') return false;

@@ -370,19 +370,23 @@ const SCREENS = {
       <button class="btn go appbig act" data-cmd="app" data-arg="3">Speed Manager</button>`;
   },
   batSetup() {
-    // 3.00V の次の 7 番が満充電(2A で入れて -6mV か 3.45V で止める)
+    if (local === 'cells') return cellsHtml();
+    // 3.00V の次の 7 番が満充電(2A で入れて -6mV か 3.45V で止める)、8 番が満充電(1本、片側ダミー電池)
     const chips = PRESETS.map((v, k) => `<button class="chip act" data-cmd="bat.preset" data-arg="${k}" data-preset="${k}">${v.toFixed(2)}</button>`).join('')
-      + `<button class="chip act" data-cmd="bat.preset" data-arg="${PRESETS.length}" data-full="1">満充電</button>`;
+      + `<button class="chip act" data-cmd="bat.preset" data-arg="${PRESETS.length}" data-full="1">満充電</button>`
+      + `<button class="chip act" data-cmd="bat.preset" data-arg="${PRESETS.length + 1}" data-cell="1">1本</button>`;
     return `<span class="state" data-k="label"></span>
       <div class="big"><span data-k="v"></span><small>V</small></div>
       <p class="note">電池の電圧(目標は下のボタンで選びます)</p>
       <div class="chips">${chips}</div>
+      <p class="note" data-k="cellNote" hidden>片側にダミー電池を入れて、電池を 1本つないでください。つなぐと番号を聞きます。</p>
       <div data-k="countdownBox" hidden>
         <p class="say" data-k="countdown"></p>
         <button class="btn sub act" data-cmd="bat.cancel">キャンセル</button>
       </div>
       <button class="row act" data-act="buz"><span>ブザー</span><span data-k="buz"></span></button>
       <button class="row act" data-act="race"><span>レース用(早く完了)</span><span data-k="race"></span></button>
+      <button class="row act" data-act="cells"><span>電池の記録・ペア</span><span>›</span></button>
       <div class="bottom pair">
         <button class="btn sub act" data-cmd="app" data-arg="0">メニューへ</button>
         <button class="btn sub act" data-cmd="app" data-arg="2">モーターへ</button>
@@ -398,6 +402,7 @@ const SCREENS = {
         <div class="cell"><b data-k="temp"></b><span>温度 ℃</span></div>
       </div>
       <p class="note">目標 <span data-k="preset"></span></p>
+      <p class="note" data-k="cellInfo"></p>
       <div class="bottom">
         <div class="pair" data-k="bdoneBox" hidden>
           <button class="btn sub act" data-cmd="bat.finish">直前仕上げ</button>
@@ -413,7 +418,19 @@ const SCREENS = {
         <div class="cell"><b data-k="mah"></b><span>充電量 mAh</span></div>
         <div class="cell"><b data-k="elapsed"></b><span>かかった時間</span></div>
       </div>
+      <p class="note" data-k="cellInfo"></p>
+      <p class="say" data-k="partner"></p>
       <div class="bottom"><button class="btn go act" data-cmd="close">閉じる</button></div>`;
+  },
+  batCellNo() {
+    return `<span class="state">番号入力</span>
+      <p class="say">電池の番号を入れてください</p>
+      <label class="row"><span>番号(1〜99)</span><input class="act" inputmode="numeric" data-f="cellNo" aria-label="電池の番号"></label>
+      <p class="note">本体の A / C でも番号を動かせます。決めると満充電(1本)を始めます。</p>
+      <div class="bottom pair">
+        <button class="btn sub act" data-cmd="bat.cancel">キャンセル</button>
+        <button class="btn go act" data-act="cellGo">決定して充電</button>
+      </div>`;
   },
   batError() {
     return `<span class="state err" data-k="label"></span>
@@ -644,6 +661,35 @@ function checksRows(rpm) {
   }).join('');
 }
 
+// ===== 電池の記録・ペア(満充電(1本)の記録。本体が bat.cells で {"t":"cr"} と {"t":"cp"} を送る) =====
+function cellsHtml() {
+  return `<span class="state">電池の記録・ペア</span>
+    <div data-k="cellsBody"></div>
+    <div class="bottom pair">
+      <button class="btn sub act" data-act="back">もどる</button>
+      <button class="btn sub act" data-act="cells">読み直す</button>
+    </div>`;
+}
+
+function cellsBodyHtml() {
+  const c = st.cells, p = st.cellPairs;
+  if (!c.complete) return '<p class="note">本体から記録を読み込んでいます…</p>';
+  if (c.n === 0) return '<p class="say">まだ記録がありません</p><p class="note">満充電(1本)で充電すると記録されます。</p>';
+  let h = '';
+  if (p.complete && p.n > 0) {
+    const b = p.rows[0];
+    h += `<p class="say">おすすめ No.${b.a} と No.${b.b}(差 ${num(b.d, 0)} mΩ)</p>`;
+    for (const r of p.rows.slice(1, 3)) h += `<p class="note">No.${r.a} と No.${r.b}(差 ${num(r.d, 0)} mΩ)</p>`;
+  } else if (p.complete) {
+    h += '<p class="note">記録が足りません(2回以上の電池が 2本必要)</p>';
+  }
+  h += '<div class="grid">';
+  for (const r of c.rows) {
+    h += `<div class="cell"><b>No.${r.no}</b><span>${typeof r.ir === 'number' ? `${num(r.ir, 1)} mΩ` : '—'} ・ ${r.cnt}回</span></div>`;
+  }
+  return h + '</div>';
+}
+
 function crsSetupHtml() {
   return `<span class="state">慣らしの設定</span>
     <label class="row"><span>慣らし方</span><select class="act" data-set="crs.mode" data-f="mode"></select></label>
@@ -769,7 +815,14 @@ function render() {
   setK('i', num(s.i, 2));
   setK('temp', num(s.temp, 1));
   setK('mah', num(s.mah));
-  setK('preset', s.full ? '満充電' : `${num(s.preset, 2)} V`);
+  setK('preset', s.cell ? '満充電(1本)' : (s.full ? '満充電' : `${num(s.preset, 2)} V`));
+  // 満充電(1本): 番号と内部抵抗、結果では相性のよい相手
+  if (s.cell && s.cell_no) {
+    setK('cellInfo', `No.${s.cell_no}` + (typeof s.cell_ir === 'number' ? `  内部抵抗 ${num(s.cell_ir, 1)} mΩ` : ''));
+  } else {
+    setK('cellInfo', '');
+  }
+  setK('partner', s.cell && s.partner ? `相性のよい相手 No.${s.partner}(差 ${num(s.partner_d, 0)} mΩ)` : '');
   setK('error', s.error || 'エラー');
   setK('prompt', s.prompt || '本体の案内を見てください');
   setK('rpm', num(s.rpm));
@@ -780,13 +833,23 @@ function render() {
   if (scr === 'batSetup') {
     for (const el of view.querySelectorAll('[data-preset]')) {
       // 満充電を選んでいる間は電圧の段は光らせない(preset は直前の段のまま送られてくる)
-      el.classList.toggle('on', !s.full && Math.abs(PRESETS[+el.dataset.preset] - s.preset) < 0.01);
+      el.classList.toggle('on', !s.full && !s.cell && Math.abs(PRESETS[+el.dataset.preset] - s.preset) < 0.01);
     }
     const fullChip = view.querySelector('[data-full]');
     if (fullChip) fullChip.classList.toggle('on', !!s.full);
+    const cellChip = view.querySelector('[data-cell]');
+    if (cellChip) cellChip.classList.toggle('on', !!s.cell);
+    const cellNote = view.querySelector('[data-k="cellNote"]');
+    if (cellNote) cellNote.hidden = !s.cell;
     const box = view.querySelector('[data-k="countdownBox"]');
-    box.hidden = s.phase !== PHASE.BAT_COUNTDOWN;
+    if (box) box.hidden = s.phase !== PHASE.BAT_COUNTDOWN;   // 記録・ペアの画面では無い
     setK('countdown', `あと ${s.detect_s} 秒で充電を始めます`);
+    const cb = view.querySelector('[data-k="cellsBody"]');
+    if (cb) cb.innerHTML = cellsBodyHtml();   // 記録は少しずつ届くので毎回書き直す
+  }
+  if (scr === 'batCellNo') {
+    const f = view.querySelector('[data-f="cellNo"]');
+    if (f && f.value === '' && document.activeElement !== f && s.cell_no) f.value = String(s.cell_no);
   }
   setK('live', num(s.live));
   setK('mv', num(s.v, 2));
@@ -932,6 +995,13 @@ view.addEventListener('click', async (e) => {
     case 'connect': connectTap(); break;
     case 'crs': local = 'crs'; render(); break;
     case 'list': local = 'list'; render(); break;
+    case 'cells': local = 'cells'; send('bat.cells'); render(); break;
+    case 'cellGo': {
+      const no = parseInt(view.querySelector('[data-f="cellNo"]')?.value, 10);
+      if (!(no >= 1 && no <= 99)) { toast('電池の番号は 1〜99 で入れてください'); return; }
+      send('bat.cellno', no);
+      break;
+    }
     case 'buz': send('bat.buzzer', s?.buz ? 0 : 1); break;
     case 'race': send('bat.race', s?.race ? 0 : 1); break;
     case 'skip':
@@ -1040,10 +1110,12 @@ const demo = {
   phase: 0,
   spd: { tire: 235, gi: 0, smot: 2, smax: 36210 },
   meas: { owner: 'かえで', saved: 0, up: 0, req: 0 },
+  cell: 0,   // 見本で満充電(1本)を選んでいるか
   status(phase) {
     const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, target: 0, elapsed_s: 0, max_s: 0, rpm: null, live: null,
       checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12,
       run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0, full: 0,
+      cell: demo.cell, cell_no: 7, cell_ir: null, partner: 0, partner_d: null,
       tire: demo.spd.tire, gear: GEARS_X10[demo.spd.gi], gi: demo.spd.gi, smot: demo.spd.smot, smax: demo.spd.smax,
       mload: null, ml: null, mh: null, mrank: 0, mtotal: 0, msaved: 0, mup: 0, owner: demo.meas.owner };
     const set = {
@@ -1064,6 +1136,9 @@ const demo = {
       23: { phase: 3, label: 'DONE', v: 2.80, i: 0.01, mah: 690, elapsed_s: 1830, bdone: 1 },
       24: { phase: 21, label: 'スピード', live: 34870 }, 25: { phase: 22, label: '本体で設定中' },
       26: { phase: 21, label: 'スピード', live: null },
+      27: { phase: 23, label: 'READY', v: 1.32, cell: 1 },
+      28: { phase: 3, label: 'FULL', v: 1.62, i: 2.0, mah: 120, elapsed_s: 240, cell: 1, cell_ir: 42.5 },
+      29: { phase: 4, label: 'RESULT', mah: 310, elapsed_s: 560, cell: 1, cell_ir: 42.5, partner: 3, partner_d: 2 },
     };
     return JSON.stringify({ ...base, ...set[phase] });
   },
@@ -1082,6 +1157,12 @@ const demo = {
       { no: 2, bi: 1, date: '11/05', nref: 34870, nl: 36010, prev: '前回 10/30 より -0.8%', pt: 2, life: '寿命 22%', lt: 2, ba: '', flags: '' },
     ];
     rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'u', i, n: rows.length, ...r })));
+  },
+  cells() {
+    const rows = [{ no: 1, ir: 40.2, cnt: 3, mah: 305 }, { no: 2, ir: 55.0, cnt: 2, mah: 290 },
+      { no: 3, ir: 42.1, cnt: 4, mah: 312 }, { no: 7, ir: 42.5, cnt: 1, mah: 310 }];
+    rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'cr', i, n: rows.length, ...r })));
+    store.apply(JSON.stringify({ t: 'cp', i: 0, n: 1, a: 1, b: 3, d: 1.9 }));
   },
   detail() {
     store.apply(JSON.stringify({ t: 'md', no: 13, l23: [13420, 1.85, 2.30], l: [16340, 2.30, 2.56], h: [15300, 2.95, 2.49],
@@ -1108,8 +1189,13 @@ function demoCommand(id, op, arg) {
       'sel.redo': 16, 'sel.input': 15, 'sel.save': 19, 'sel.uploaded': 19, 'sel.end': 6, 'sel.owner': p, skip: 10, 'bat.finish': 3, 'bat.recheck': 3,
       'spd.tire': p, 'spd.gear': p, 'spd.motor': p, 'spd.clr': p }[op];
     if (go !== undefined) demo.show(go);
+    if (op === 'bat.cellno') demo.show(28);
+    if (op === 'bat.cells') demo.cells();
     if (op === 'bat.preset') {
-      store.apply(arg >= PRESETS.length
+      demo.cell = arg === PRESETS.length + 1 ? 1 : 0;
+      store.apply(arg === PRESETS.length + 1
+        ? demo.status(demo.phase)
+        : arg >= PRESETS.length
         ? demo.status(demo.phase).replace('"full":0', '"full":1')
         : demo.status(demo.phase).replace('"preset":2.8', `"preset":${PRESETS[arg]}`));
     }
@@ -1129,7 +1215,7 @@ function startDemo() {
   bar.hidden = false;
   const names = ['選択', '電池待機', '数え中', '充電中', '充電結果', 'エラー', 'モーター', '本体操作', '本体運転', '案内', '慣らし中', '失敗', '結果',
     '手動', '手動回転', '計測番号', '計測案内', '計測中', '計測失敗', '計測結果', '(旧)一覧', '手動一時停止', '冷却中', '充電完了待ち',
-    'スピード', 'スピード設定中', 'スピード測れず'];
+    'スピード', 'スピード設定中', 'スピード測れず', '1本番号', '1本充電中', '1本結果'];
   bar.innerHTML = names.map((n, k) => `<button data-demo="${k}">${n}</button>`).join('') + '<button data-demo="cut">切断</button>';
   bar.addEventListener('click', (e) => {
     const k = e.target.dataset.demo;
