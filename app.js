@@ -23,22 +23,23 @@ let rxChar = null;
 
 // multi: 同じ命令を値を変えて何度も送る(sel.del)。ふつうは最後の値だけ送る(設定のつまみなど)
 // onOk: 本体が ok と返したときに呼ぶ(sel.del の送れた印を覚える)
-function send(op, arg, multi = false, onOk = null) {
+// onFail: 断られたとき(res を渡す)。あればいつもの知らせの代わりに呼ぶ
+function send(op, arg, multi = false, onOk = null, onFail = null) {
   if (!st.connected) { if (!multi) toast('つながっていません'); return; }
   if (!multi && pending && pending.op === op && arg === undefined) return;   // 連打
   const q = !multi && queue.find((x) => x.op === op);
   if (q) { q.arg = arg; return; }
-  queue.push({ op, arg, onOk, quiet: multi });
+  queue.push({ op, arg, onOk, onFail, quiet: multi });
   pump();
 }
 
 async function pump() {
   if (pending || queue.length === 0) return;
-  const { op, arg, onOk, quiet } = queue.shift();
+  const { op, arg, onOk, onFail, quiet } = queue.shift();
   const id = nextId;
   nextId = nextId >= 65535 ? 1 : nextId + 1;
   const line = buildCommand(id, op, arg);
-  pending = { id, op, onOk, quiet, timer: setTimeout(() => { pending = null; if (!quiet) toast('届きませんでした'); pump(); }, REPLY_TIMEOUT_MS) };
+  pending = { id, op, onOk, onFail, quiet, timer: setTimeout(() => { pending = null; if (!quiet) toast('届きませんでした'); pump(); }, REPLY_TIMEOUT_MS) };
   try {
     if (DEMO) demoCommand(id, op, arg);
     else await rxChar.writeValueWithResponse(new TextEncoder().encode(line));
@@ -56,6 +57,7 @@ store.onReply = (id, res) => {
   const p = pending;
   pending = null;
   if (res === 'ok') { if (p.onOk) p.onOk(); }
+  else if (p.onFail) p.onFail(res);
   else if (!p.quiet) toast(REJECT_TEXT[res] || `断られました (${res})`);   // sel.del など続けて送る命令は黙って次へ
   pump();
 };
@@ -180,6 +182,8 @@ const stopBtn = (label = '長押しで中止') => `<button class="btn stop act" 
 // 画面ごとに骨組みを 1 回だけ作り、値は data-k の要素だけ書き換える(押している途中のボタンを作り直さない)
 let local = null;              // ページの中だけで開く画面: 'crs' | 'motors' | 'list' | 'd:<番号>'(本体は動かさない)
 let localFor = '';             // local を開いた画面。画面が変わったら閉じる
+let resNoEdited = false;       // 結果画面の「番号を直す」の欄をスマホで書きかえたか
+let cellNoEdited = false;      // 番号入力の欄をスマホで書きかえたか(書きかえるまでは本体の番号についていく)
 // 計測の所有者の候補(この端末で入れた名前。新しい順に 20 件まで)
 const OWNERS_KEY = 'kaede_phone_owners';
 function loadOwners() {
@@ -370,19 +374,24 @@ const SCREENS = {
       <button class="btn go appbig act" data-cmd="app" data-arg="3">Speed Manager</button>`;
   },
   batSetup() {
-    // 3.00V の次の 7 番が満充電(2A で入れて -6mV か 3.45V で止める)
+    if (local === 'cells') return cellsHtml();
+    if (local && local.startsWith('cr:')) return cellRecsHtml(+local.slice(3));
+    // 3.00V の次の 7 番が満充電(2A で入れて -6mV か 3.45V で止める)、8 番が満充電(1本、片側ダミー電池)
     const chips = PRESETS.map((v, k) => `<button class="chip act" data-cmd="bat.preset" data-arg="${k}" data-preset="${k}">${v.toFixed(2)}</button>`).join('')
-      + `<button class="chip act" data-cmd="bat.preset" data-arg="${PRESETS.length}" data-full="1">満充電</button>`;
+      + `<button class="chip act" data-cmd="bat.preset" data-arg="${PRESETS.length}" data-full="1">満充電</button>`
+      + `<button class="chip act" data-cmd="bat.preset" data-arg="${PRESETS.length + 1}" data-cell="1">1本</button>`;
     return `<span class="state" data-k="label"></span>
       <div class="big"><span data-k="v"></span><small>V</small></div>
       <p class="note">電池の電圧(目標は下のボタンで選びます)</p>
       <div class="chips">${chips}</div>
+      <p class="note" data-k="cellNote" hidden>片側にダミー電池を入れて、電池を 1本つないでください。つなぐと番号を聞きます。</p>
       <div data-k="countdownBox" hidden>
         <p class="say" data-k="countdown"></p>
         <button class="btn sub act" data-cmd="bat.cancel">キャンセル</button>
       </div>
       <button class="row act" data-act="buz"><span>ブザー</span><span data-k="buz"></span></button>
       <button class="row act" data-act="race"><span>レース用(早く完了)</span><span data-k="race"></span></button>
+      <button class="row act" data-act="cells"><span>電池の記録・ペア</span><span>›</span></button>
       <div class="bottom pair">
         <button class="btn sub act" data-cmd="app" data-arg="0">メニューへ</button>
         <button class="btn sub act" data-cmd="app" data-arg="2">モーターへ</button>
@@ -398,6 +407,7 @@ const SCREENS = {
         <div class="cell"><b data-k="temp"></b><span>温度 ℃</span></div>
       </div>
       <p class="note">目標 <span data-k="preset"></span></p>
+      <p class="note" data-k="cellInfo"></p>
       <div class="bottom">
         <div class="pair" data-k="bdoneBox" hidden>
           <button class="btn sub act" data-cmd="bat.finish">直前仕上げ</button>
@@ -413,7 +423,25 @@ const SCREENS = {
         <div class="cell"><b data-k="mah"></b><span>充電量 mAh</span></div>
         <div class="cell"><b data-k="elapsed"></b><span>かかった時間</span></div>
       </div>
+      <p class="note" data-k="cellInfo"></p>
+      <p class="say" data-k="partner"></p>
+      <div data-k="cellEditBox" hidden>
+        <label class="row"><span>番号を直す(1〜99)</span><span class="tgt">
+          <input class="act" inputmode="numeric" data-f="resNo" aria-label="直す番号">
+          <button class="chip act" data-act="resRenum">直す</button></span></label>
+        <button class="btn sub act" data-act="resDel">この記録を消す</button>
+      </div>
       <div class="bottom"><button class="btn go act" data-cmd="close">閉じる</button></div>`;
+  },
+  batCellNo() {
+    return `<span class="state">番号入力</span>
+      <p class="say">電池の番号を入れてください</p>
+      <label class="row"><span>番号(1〜99)</span><input class="act" inputmode="numeric" data-f="cellNo" aria-label="電池の番号"></label>
+      <p class="note">本体の A / C でも番号を動かせます。決めると満充電(1本)を始めます。</p>
+      <div class="bottom pair">
+        <button class="btn sub act" data-cmd="bat.cancel">キャンセル</button>
+        <button class="btn go act" data-act="cellGo">決定して充電</button>
+      </div>`;
   },
   batError() {
     return `<span class="state err" data-k="label"></span>
@@ -644,6 +672,76 @@ function checksRows(rpm) {
   }).join('');
 }
 
+// ===== 電池の記録・ペア(満充電(1本)の記録。本体が bat.cells で {"t":"cr"} と {"t":"cp"} を送る) =====
+function cellsHtml() {
+  return `<span class="state">電池の記録・ペア</span>
+    <div data-k="cellsBody"></div>
+    <div class="bottom pair">
+      <button class="btn sub act" data-act="back">もどる</button>
+      <button class="btn sub act" data-act="cells">読み直す</button>
+    </div>`;
+}
+
+function cellsBodyHtml() {
+  const c = st.cells, p = st.cellPairs;
+  if (!c.complete) return '<p class="note">本体から記録を読み込んでいます…</p>';
+  if (c.n === 0) return '<p class="say">まだ記録がありません</p><p class="note">満充電(1本)で充電すると記録されます。</p>';
+  let h = '';
+  if (p.complete && p.n > 0) {
+    const b = p.rows[0];
+    h += `<p class="say">おすすめ No.${b.a} と No.${b.b}(差 ${num(b.d, 0)} mΩ)</p>`;
+    for (const r of p.rows.slice(1, 3)) h += `<p class="note">No.${r.a} と No.${r.b}(差 ${num(r.d, 0)} mΩ)</p>`;
+  } else if (p.complete) {
+    h += '<p class="note">記録が足りません(2回以上の電池が 2本必要)</p>';
+  }
+  h += '<p class="note">電池を押すと、その電池の記録(番号を変える・消す)を開きます。</p><div class="grid">';
+  for (const r of c.rows) {
+    h += `<button class="cell act" data-cellno="${r.no}"><b>No.${r.no}</b><span>${typeof r.ir === 'number' ? `${num(r.ir, 1)} mΩ` : '—'} ・ ${r.cnt}回</span></button>`;
+  }
+  return h + '</div>';
+}
+
+// ===== その電池の記録(新しい順。本体が bat.cellrecs N で {"t":"ce"} を送る) =====
+const REASON_TEXT = { PEAK: 'ピーク', VMAX: '電圧上限', FLAT: '伸びなくなった' };
+function shortDt(dt) { return typeof dt === 'string' && dt.length >= 16 ? `${dt.slice(5, 7)}/${dt.slice(8, 10)} ${dt.slice(11, 16)}` : esc(String(dt || '')); }
+
+function cellRecsHtml(no) {
+  return `<span class="state">No.${no} の記録</span>
+    <div data-k="cellRecsBody"></div>
+    <div class="bottom pair">
+      <button class="btn sub act" data-act="cells">もどる</button>
+      <button class="btn sub act" data-act="recsReload">読み直す</button>
+    </div>`;
+}
+
+function cellRecsBodyHtml() {
+  const c = st.cellRecs;
+  if (!c.complete) return '<p class="note">本体から記録を読み込んでいます…</p>';
+  if (c.n === 0) return '<p class="say">この電池の記録はありません</p>';
+  let h = '<p class="note">新しい順。番号を入れて「変える」で別の電池の記録にします。消した記録は元に戻せません。</p>';
+  for (const r of c.rows) {
+    const ir = typeof r.ir === 'number' ? `${num(r.ir, 1)} mΩ` : '—';
+    h += `<div class="cell recRow">
+      <b>${shortDt(r.dt)}</b><span>${ir} ・ ${num(r.mah)} mAh ・ ${esc(REASON_TEXT[r.why] || String(r.why || ''))}</span>
+      <div class="row"><span>番号</span><span class="tgt">
+        <input class="act" inputmode="numeric" data-renum="${r.k}" value="${r.no}" aria-label="新しい番号">
+        <button class="chip act" data-act="recRenum" data-k="${r.k}" data-dt="${esc(r.dt)}">変える</button>
+        <button class="chip del act" data-act="recDel" data-k="${r.k}" data-dt="${esc(r.dt)}">消す</button></span></div>
+    </div>`;
+  }
+  return h;
+}
+
+// 記録を直したら(ok でも、見つからなかったときも)一覧と記録を読み直す
+function cellEditSend(op, text, okMsg, no) {
+  if (!st.connected) { toast('つながっていません'); return; }
+  const reload = () => { send('bat.cells'); if (no) send('bat.cellrecs', no); };
+  send(op, text, true, () => { toast(okMsg); reload(); }, (res) => {
+    toast(res === 'range' ? '記録が見つかりません。読み直しました' : res === 'state' ? 'いまは直せません(充電中・番号入力中)' : 'SD に書けませんでした');
+    reload();
+  });
+}
+
 function crsSetupHtml() {
   return `<span class="state">慣らしの設定</span>
     <label class="row"><span>慣らし方</span><select class="act" data-set="crs.mode" data-f="mode"></select></label>
@@ -769,7 +867,22 @@ function render() {
   setK('i', num(s.i, 2));
   setK('temp', num(s.temp, 1));
   setK('mah', num(s.mah));
-  setK('preset', s.full ? '満充電' : `${num(s.preset, 2)} V`);
+  setK('preset', s.cell ? '満充電(1本)' : (s.full ? '満充電' : `${num(s.preset, 2)} V`));
+  // 満充電(1本): 番号と内部抵抗、結果では相性のよい相手
+  if (s.cell && s.cell_no) {
+    setK('cellInfo', `No.${s.cell_no}` + (typeof s.cell_ir === 'number' ? `  内部抵抗 ${num(s.cell_ir, 1)} mΩ` : ''));
+  } else {
+    setK('cellInfo', '');
+  }
+  setK('partner', s.cell && s.cell_del ? 'この記録は消しました'
+    : (s.cell && s.partner ? `相性のよい相手 No.${s.partner}(差 ${num(s.partner_d, 0)} mΩ)` : ''));
+  // 結果画面: 直前の記録を直せるとき(本体が cell_k と cell_dt を送る)
+  const editBox = view.querySelector('[data-k="cellEditBox"]');
+  if (editBox) {
+    editBox.hidden = !(s.cell && s.cell_dt);
+    const f = view.querySelector('[data-f="resNo"]');
+    if (f && document.activeElement !== f && !resNoEdited && s.cell_no) f.value = String(s.cell_no);
+  }
   setK('error', s.error || 'エラー');
   setK('prompt', s.prompt || '本体の案内を見てください');
   setK('rpm', num(s.rpm));
@@ -780,14 +893,33 @@ function render() {
   if (scr === 'batSetup') {
     for (const el of view.querySelectorAll('[data-preset]')) {
       // 満充電を選んでいる間は電圧の段は光らせない(preset は直前の段のまま送られてくる)
-      el.classList.toggle('on', !s.full && Math.abs(PRESETS[+el.dataset.preset] - s.preset) < 0.01);
+      el.classList.toggle('on', !s.full && !s.cell && Math.abs(PRESETS[+el.dataset.preset] - s.preset) < 0.01);
     }
     const fullChip = view.querySelector('[data-full]');
     if (fullChip) fullChip.classList.toggle('on', !!s.full);
+    const cellChip = view.querySelector('[data-cell]');
+    if (cellChip) cellChip.classList.toggle('on', !!s.cell);
+    const cellNote = view.querySelector('[data-k="cellNote"]');
+    if (cellNote) cellNote.hidden = !s.cell;
     const box = view.querySelector('[data-k="countdownBox"]');
-    box.hidden = s.phase !== PHASE.BAT_COUNTDOWN;
+    if (box) box.hidden = s.phase !== PHASE.BAT_COUNTDOWN;   // 記録・ペアの画面では無い
     setK('countdown', `あと ${s.detect_s} 秒で充電を始めます`);
+    const cb = view.querySelector('[data-k="cellsBody"]');
+    if (cb) cb.innerHTML = cellsBodyHtml();   // 記録は少しずつ届くので毎回書き直す
+    const rb = view.querySelector('[data-k="cellRecsBody"]');
+    if (rb) {   // 番号の欄を書いている途中で消さないよう、中身が変わったときだけ書き直す
+      const html = cellRecsBodyHtml();
+      if (html !== rb.dataset.html) { rb.innerHTML = html; rb.dataset.html = html; }
+    }
   }
+  if (scr === 'batCellNo') {
+    const f = view.querySelector('[data-f="cellNo"]');
+    // 本体の A/C で番号を動かしたら欄もついていく(スマホで書きかえたら、その番号を使う)
+    if (f && !cellNoEdited && document.activeElement !== f && s.cell_no) f.value = String(s.cell_no);
+  } else {
+    cellNoEdited = false;
+  }
+  if (scr !== 'batResult') resNoEdited = false;
   setK('live', num(s.live));
   setK('mv', num(s.v, 2));
   if (scr === 'motBusy') {
@@ -922,6 +1054,10 @@ view.addEventListener('click', async (e) => {
   const el = e.target.closest('button');
   if (!el || el.disabled) return;
   if (el.dataset.unit) { local = `d:${el.dataset.unit}`; render(); return; }
+  if (el.dataset.cellno) {
+    st.cellRecs.complete = false; st.cellRecs.rows = [];
+    local = `cr:${el.dataset.cellno}`; send('bat.cellrecs', +el.dataset.cellno); render(); return;
+  }
   if (el.dataset.cmd) {
     send(el.dataset.cmd, el.dataset.arg === undefined ? undefined : Number(el.dataset.arg));
     if (el.dataset.cmd === 'mot.type' || el.dataset.cmd === 'spd.motor') { local = null; render(); }
@@ -932,6 +1068,43 @@ view.addEventListener('click', async (e) => {
     case 'connect': connectTap(); break;
     case 'crs': local = 'crs'; render(); break;
     case 'list': local = 'list'; render(); break;
+    case 'cells': local = 'cells'; send('bat.cells'); render(); break;
+    case 'recsReload': if (local && local.startsWith('cr:')) send('bat.cellrecs', +local.slice(3)); break;
+    case 'recRenum': {
+      const no = parseInt(view.querySelector(`[data-renum="${el.dataset.k}"]`)?.value, 10);
+      if (!(no >= 1 && no <= 99)) { toast('電池の番号は 1〜99 で入れてください'); return; }
+      const cur = local && local.startsWith('cr:') ? +local.slice(3) : 0;
+      if (no === cur) { toast('同じ番号です'); return; }
+      if (await ask(`${shortDt(el.dataset.dt)} の記録を No.${no} に変えますか?`, '変える'))
+        cellEditSend('cell.renum', `${el.dataset.k}|${el.dataset.dt}|${no}`, `No.${no} に変えました`, cur);
+      break;
+    }
+    case 'recDel': {
+      const cur = local && local.startsWith('cr:') ? +local.slice(3) : 0;
+      if (await ask(`${shortDt(el.dataset.dt)} の記録を消しますか?\n消した記録は元に戻せません。`, '消す'))
+        cellEditSend('cell.del', `${el.dataset.k}|${el.dataset.dt}`, '記録を消しました', cur);
+      break;
+    }
+    case 'resRenum': {
+      const no = parseInt(view.querySelector('[data-f="resNo"]')?.value, 10);
+      if (!(no >= 1 && no <= 99)) { toast('電池の番号は 1〜99 で入れてください'); return; }
+      if (!s?.cell_dt) return;
+      if (no === s.cell_no) { toast('同じ番号です'); return; }
+      resNoEdited = false;
+      cellEditSend('cell.renum', `${s.cell_k}|${s.cell_dt}|${no}`, `No.${no} に直しました`, 0);
+      break;
+    }
+    case 'resDel':
+      if (!s?.cell_dt) return;
+      if (await ask(`No.${s.cell_no} のこの記録を消しますか?\n消した記録は元に戻せません。`, '消す'))
+        cellEditSend('cell.del', `${s.cell_k}|${s.cell_dt}`, '記録を消しました', 0);
+      break;
+    case 'cellGo': {
+      const no = parseInt(view.querySelector('[data-f="cellNo"]')?.value, 10);
+      if (!(no >= 1 && no <= 99)) { toast('電池の番号は 1〜99 で入れてください'); return; }
+      send('bat.cellno', no);
+      break;
+    }
     case 'buz': send('bat.buzzer', s?.buz ? 0 : 1); break;
     case 'race': send('bat.race', s?.race ? 0 : 1); break;
     case 'skip':
@@ -997,6 +1170,8 @@ view.addEventListener('change', (e) => {
   const el = e.target;
   const f = el.dataset.f;
   if (!f) return;
+  if (f === 'cellNo') { cellNoEdited = true; return; }
+  if (f === 'resNo') { resNoEdited = true; return; }
   if (f === 'selNo' || f === 'manV' || f === 'spdTire') { render(); return; }   // 送るのはボタンを押したとき
   if (f === 'owner') {
     const name = el.value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
@@ -1040,10 +1215,12 @@ const demo = {
   phase: 0,
   spd: { tire: 235, gi: 0, smot: 2, smax: 36210 },
   meas: { owner: 'かえで', saved: 0, up: 0, req: 0 },
+  cell: 0,   // 見本で満充電(1本)を選んでいるか
   status(phase) {
     const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, target: 0, elapsed_s: 0, max_s: 0, rpm: null, live: null,
       checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12,
       run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0, full: 0,
+      cell: demo.cell, cell_no: 7, cell_ir: null, partner: 0, partner_d: null,
       tire: demo.spd.tire, gear: GEARS_X10[demo.spd.gi], gi: demo.spd.gi, smot: demo.spd.smot, smax: demo.spd.smax,
       mload: null, ml: null, mh: null, mrank: 0, mtotal: 0, msaved: 0, mup: 0, owner: demo.meas.owner };
     const set = {
@@ -1064,6 +1241,10 @@ const demo = {
       23: { phase: 3, label: 'DONE', v: 2.80, i: 0.01, mah: 690, elapsed_s: 1830, bdone: 1 },
       24: { phase: 21, label: 'スピード', live: 34870 }, 25: { phase: 22, label: '本体で設定中' },
       26: { phase: 21, label: 'スピード', live: null },
+      27: { phase: 23, label: 'READY', v: 1.32, cell: 1 },
+      28: { phase: 3, label: 'FULL', v: 1.62, i: 2.0, mah: 120, elapsed_s: 240, cell: 1, cell_ir: 42.5 },
+      29: { phase: 4, label: 'RESULT', mah: 310, elapsed_s: 560, cell: 1, cell_ir: 42.5, partner: 3, partner_d: 2,
+        cell_del: 0, cell_k: 12, cell_dt: '2026-11-25 19:30:12' },
     };
     return JSON.stringify({ ...base, ...set[phase] });
   },
@@ -1082,6 +1263,18 @@ const demo = {
       { no: 2, bi: 1, date: '11/05', nref: 34870, nl: 36010, prev: '前回 10/30 より -0.8%', pt: 2, life: '寿命 22%', lt: 2, ba: '', flags: '' },
     ];
     rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'u', i, n: rows.length, ...r })));
+  },
+  cells() {
+    const rows = [{ no: 1, ir: 40.2, cnt: 3, mah: 305 }, { no: 2, ir: 55.0, cnt: 2, mah: 290 },
+      { no: 3, ir: 42.1, cnt: 4, mah: 312 }, { no: 7, ir: 42.5, cnt: 1, mah: 310 }];
+    rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'cr', i, n: rows.length, ...r })));
+    store.apply(JSON.stringify({ t: 'cp', i: 0, n: 1, a: 1, b: 3, d: 1.9 }));
+  },
+  cellRecs(no) {
+    const rows = [{ k: 12, dt: '2026-11-25 19:30:12', no, ir: 42.5, why: 'PEAK', mah: 98 },
+      { k: 7, dt: '2026-11-24 21:05:40', no, ir: 44.1, why: 'FLAT', mah: 60 },
+      { k: 2, dt: '2026-11-24 12:10:03', no, ir: null, why: 'VMAX', mah: 18 }];
+    rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'ce', i, n: rows.length, ...r })));
   },
   detail() {
     store.apply(JSON.stringify({ t: 'md', no: 13, l23: [13420, 1.85, 2.30], l: [16340, 2.30, 2.56], h: [15300, 2.95, 2.49],
@@ -1108,8 +1301,14 @@ function demoCommand(id, op, arg) {
       'sel.redo': 16, 'sel.input': 15, 'sel.save': 19, 'sel.uploaded': 19, 'sel.end': 6, 'sel.owner': p, skip: 10, 'bat.finish': 3, 'bat.recheck': 3,
       'spd.tire': p, 'spd.gear': p, 'spd.motor': p, 'spd.clr': p }[op];
     if (go !== undefined) demo.show(go);
+    if (op === 'bat.cellno') demo.show(28);
+    if (op === 'bat.cells') demo.cells();
+    if (op === 'bat.cellrecs') demo.cellRecs(arg);
     if (op === 'bat.preset') {
-      store.apply(arg >= PRESETS.length
+      demo.cell = arg === PRESETS.length + 1 ? 1 : 0;
+      store.apply(arg === PRESETS.length + 1
+        ? demo.status(demo.phase)
+        : arg >= PRESETS.length
         ? demo.status(demo.phase).replace('"full":0', '"full":1')
         : demo.status(demo.phase).replace('"preset":2.8', `"preset":${PRESETS[arg]}`));
     }
@@ -1129,7 +1328,7 @@ function startDemo() {
   bar.hidden = false;
   const names = ['選択', '電池待機', '数え中', '充電中', '充電結果', 'エラー', 'モーター', '本体操作', '本体運転', '案内', '慣らし中', '失敗', '結果',
     '手動', '手動回転', '計測番号', '計測案内', '計測中', '計測失敗', '計測結果', '(旧)一覧', '手動一時停止', '冷却中', '充電完了待ち',
-    'スピード', 'スピード設定中', 'スピード測れず'];
+    'スピード', 'スピード設定中', 'スピード測れず', '1本番号', '1本充電中', '1本結果'];
   bar.innerHTML = names.map((n, k) => `<button data-demo="${k}">${n}</button>`).join('') + '<button data-demo="cut">切断</button>';
   bar.addEventListener('click', (e) => {
     const k = e.target.dataset.demo;
