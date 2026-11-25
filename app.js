@@ -407,6 +407,11 @@ const SCREENS = {
         <div class="cell"><b data-k="temp"></b><span>温度 ℃</span></div>
       </div>
       <p class="note">目標 <span data-k="preset"></span></p>
+      <div class="grid" data-k="fcBox" hidden>
+        <div class="cell"><b data-k="fcPeak"></b><span>最大 V</span></div>
+        <div class="cell"><b data-k="fcDrop"></b><span>下がり mV</span></div>
+      </div>
+      <p class="note" data-k="fcStop"></p>
       <p class="note" data-k="cellInfo"></p>
       <div class="bottom">
         <div class="pair" data-k="bdoneBox" hidden>
@@ -876,6 +881,13 @@ function render() {
   }
   setK('partner', s.cell && s.cell_del ? 'この記録は消しました'
     : (s.cell && s.partner ? `相性のよい相手 No.${s.partner}(差 ${num(s.partner_d, 0)} mΩ)` : ''));
+  // 満充電: 最大・下がりと止める条件(本体の画面と同じ値。満充電の充電中だけ届く)
+  const fcOn = typeof s.fc_vmax === 'number' && s.fc_vmax > 0;
+  const hasPeak = fcOn && typeof s.fc_peak === 'number' && s.fc_peak > 0;
+  setK('fcPeak', hasPeak ? num(s.fc_peak, 3) : '—');
+  setK('fcDrop', hasPeak ? `−${num(s.fc_drop, 1)}` : '—');
+  setK('fcStop', !fcOn ? '' : (hasPeak ? '' : 'ピークを見ています。') + `−${num(s.fc_dmv, 0)} mV か ${num(s.fc_vmax, 2)} V で止めます`);
+  for (const el of view.querySelectorAll('[data-k="fcBox"],[data-k="fcStop"]')) el.hidden = !fcOn;   // 通常の充電では場所を取らない
   // 結果画面: 直前の記録を直せるとき(本体が cell_k と cell_dt を送る)
   const editBox = view.querySelector('[data-k="cellEditBox"]');
   if (editBox) {
@@ -1242,7 +1254,8 @@ const demo = {
       24: { phase: 21, label: 'スピード', live: 34870 }, 25: { phase: 22, label: '本体で設定中' },
       26: { phase: 21, label: 'スピード', live: null },
       27: { phase: 23, label: 'READY', v: 1.32, cell: 1 },
-      28: { phase: 3, label: 'FULL', v: 1.62, i: 2.0, mah: 120, elapsed_s: 240, cell: 1, cell_ir: 42.5 },
+      28: { phase: 3, label: 'FULL', v: 1.62, i: 2.0, mah: 120, elapsed_s: 240, cell: 1, cell_ir: 42.5,
+        fc_peak: 1.8352, fc_drop: 1.4, fc_dmv: 3, fc_vmax: 1.86 },
       29: { phase: 4, label: 'RESULT', mah: 310, elapsed_s: 560, cell: 1, cell_ir: 42.5, partner: 3, partner_d: 2,
         cell_del: 0, cell_k: 12, cell_dt: '2026-11-25 19:30:12' },
     };
