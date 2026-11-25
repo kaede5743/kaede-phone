@@ -73,6 +73,7 @@ export function createStore() {
     units: { n: 0, rows: [], complete: false },   // 選別の個体の一覧(本体が推定回転数の速い順に送る)
     cells: { n: 0, rows: [], complete: false },   // 電池の記録(満充電(1本)、番号順) {"t":"cr"}
     cellPairs: { n: 0, rows: [], complete: false },   // ペアの候補(差の小さい順、先頭がおすすめ) {"t":"cp"}
+    cellRecs: { n: 0, rows: [], complete: false },    // その電池の記録(新しい順、bat.cellrecs N) {"t":"ce"}
     measDetail: null,      // 計測の詳細 {"t":"md"}(最後に届いたもの。番号 no で今の結果のものか確かめる)
     versionOk: true,
   };
@@ -112,6 +113,9 @@ export function createStore() {
           break;
         case 'cp':   // ペアの候補の 1行
           if (!applyUnit(state.cellPairs, m)) return false;
+          break;
+        case 'ce':   // その電池の記録の 1行(k と dt で行を見分けて cell.renum / cell.del)
+          if (!applyUnit(state.cellRecs, m)) return false;
           break;
         case 'md':   // 計測の詳細(結果の画面に入ったときと sel.detail のとき)
           if (typeof m.no !== 'number') return false;
