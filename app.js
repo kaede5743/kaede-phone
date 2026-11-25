@@ -734,8 +734,9 @@ function cellRecsBodyHtml() {
 
 // 記録を直したら(ok でも、見つからなかったときも)一覧と記録を読み直す
 function cellEditSend(op, text, okMsg, no) {
+  if (!st.connected) { toast('つながっていません'); return; }
   const reload = () => { send('bat.cells'); if (no) send('bat.cellrecs', no); };
-  send(op, text, false, () => { toast(okMsg); reload(); }, (res) => {
+  send(op, text, true, () => { toast(okMsg); reload(); }, (res) => {
     toast(res === 'range' ? '記録が見つかりません。読み直しました' : res === 'state' ? 'いまは直せません(充電中・番号入力中)' : 'SD に書けませんでした');
     reload();
   });
