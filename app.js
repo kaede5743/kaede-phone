@@ -499,8 +499,9 @@ const SCREENS = {
   batCellNo() {
     return `<span class="state">番号入力</span>
       <p class="say">電池の番号を入れてください</p>
-      <label class="row"><span>番号(1〜99)</span><input class="act" inputmode="numeric" data-f="cellNo" aria-label="電池の番号"></label>
-      <p class="note">本体の A / C でも番号を動かせます。決めると満充電(1本)を始めます。</p>
+      <label class="row"><span>番号(1〜99)</span><input class="act" inputmode="numeric" data-f="cellNo" placeholder="なし" aria-label="電池の番号"></label>
+      <p class="note">本体の A / C でも番号を動かせます(1 の下が「なし」)。決めると満充電(1本)を始めます。</p>
+      <button class="btn sub act" data-act="cellGoNone">番号なしで充電(測らず・記録せず)</button>
       <div class="bottom pair">
         <button class="btn sub act" data-cmd="bat.cancel">キャンセル</button>
         <button class="btn go act" data-act="cellGo">決定して充電</button>
@@ -934,6 +935,8 @@ function render() {
   // 満充電(1本): 番号と内部抵抗、結果では相性のよい相手
   if (s.cell && s.cell_no) {
     setK('cellInfo', `No.${s.cell_no}` + (typeof s.cell_ir === 'number' ? `  内部抵抗 ${num(s.cell_ir, 1)} mΩ` : ''));
+  } else if (s.cell && s.cell_no === 0 && (s.phase === PHASE.BAT_RUN || s.phase === PHASE.BAT_RESULT)) {
+    setK('cellInfo', '番号なし(測らず・記録せず)');
   } else {
     setK('cellInfo', '');
   }
@@ -987,7 +990,7 @@ function render() {
   if (scr === 'batCellNo') {
     const f = view.querySelector('[data-f="cellNo"]');
     // 本体の A/C で番号を動かしたら欄もついていく(スマホで書きかえたら、その番号を使う)
-    if (f && !cellNoEdited && document.activeElement !== f && s.cell_no) f.value = String(s.cell_no);
+    if (f && !cellNoEdited && document.activeElement !== f) f.value = s.cell_no ? String(s.cell_no) : '';   // 0 = 番号なし(欄は空で「なし」)
   } else {
     cellNoEdited = false;
   }
@@ -1176,11 +1179,14 @@ view.addEventListener('click', async (e) => {
         cellEditSend('cell.del', `${s.cell_k}|${s.cell_dt}`, '記録を消しました', 0);
       break;
     case 'cellGo': {
-      const no = parseInt(view.querySelector('[data-f="cellNo"]')?.value, 10);
+      const raw = (view.querySelector('[data-f="cellNo"]')?.value || '').trim();
+      if (raw === '' && s?.cell_no === 0) { send('bat.cellno', 0); break; }   // 本体で「なし」にしてある
+      const no = parseInt(raw, 10);
       if (!(no >= 1 && no <= 99)) { toast('電池の番号は 1〜99 で入れてください'); return; }
       send('bat.cellno', no);
       break;
     }
+    case 'cellGoNone': send('bat.cellno', 0); break;   // 0 = 番号なし: 内部抵抗を測らず、記録もしない
     case 'buz': send('bat.buzzer', s?.buz ? 0 : 1); break;
     case 'race': send('bat.race', s?.race ? 0 : 1); break;
     case 'notify': toggleNotify(); break;
