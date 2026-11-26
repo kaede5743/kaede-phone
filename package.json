@@ -1,0 +1,8 @@
+{
+  "name": "kaede-phone",
+  "private": true,
+  "description": "KaedeSystem をスマホから Bluetooth で操作するページ",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}
