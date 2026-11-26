@@ -1,4 +1,5 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
+import { createChargeWatch, chargeEvent } from './notify.js';
 import { LineBuffer, createStore, screenFor, buildCommand, textArgOk, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
 import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, refCommandText, canResend, queueLabBody, labCodeOf, backfillToast, clockText } from './select.js';
 
@@ -177,6 +178,61 @@ function bindLongPress(el, onDone) {
 }
 
 const stopBtn = (label = '長押しで中止') => `<button class="btn stop act" data-long="stop"><span>${label}</span></button>`;
+
+// ===== 充電の終わりの知らせ(振動・通知)と、充電中に画面を消さない =====
+// 画面が消えると Bluetooth が切れやすく、知らせも届かないので、知らせを ON にしている間は充電中の画面をつけたままにする
+const NOTIFY_KEY = 'kaede_phone_notify';
+const chargeWatch = createChargeWatch();
+function notifyOn() { try { return localStorage.getItem(NOTIFY_KEY) !== '0'; } catch { return true; } }
+function setNotifyOn(on) { try { localStorage.setItem(NOTIFY_KEY, on ? '1' : '0'); } catch { /* 覚えられなくてもこの間は効く */ } }
+function canSysNotify() { return 'Notification' in window && 'serviceWorker' in navigator && location.protocol === 'https:'; }
+function notifyLabel() {
+  if (!notifyOn()) return 'OFF';
+  if (canSysNotify() && Notification.permission === 'granted') return 'ON';
+  return 'ON(振動だけ)';
+}
+async function toggleNotify() {
+  if (notifyOn()) { setNotifyOn(false); updateWakeLock(); render(); return; }
+  setNotifyOn(true);
+  // 通知の許可はボタンを押したときにしか聞けない。断られても振動と画面の表示は出す
+  if (canSysNotify() && Notification.permission === 'default') {
+    try { await Notification.requestPermission(); } catch { /* 古いブラウザ */ }
+  }
+  if (canSysNotify() && Notification.permission === 'denied') toast('通知は許可されていません(振動だけ知らせます)');
+  updateWakeLock(); render();
+}
+async function fireNotice(ev) {
+  if (!notifyOn()) return;
+  if (navigator.vibrate) navigator.vibrate(ev.kind === 'error' ? [600, 200, 600, 200, 600] : [300, 150, 300, 150, 300]);
+  toast(`${ev.title}  ${ev.body}`);
+  if (!canSysNotify() || Notification.permission !== 'granted') return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification(`KaedeSystem: ${ev.title}`, {
+      body: ev.body, tag: 'kaede-charge', renotify: true, icon: 'icon.svg',
+      vibrate: [300, 150, 300], requireInteraction: ev.kind === 'error',
+    });
+  } catch { /* 通知が出せなくても振動と画面の表示は出ている */ }
+}
+let wakeLock = null, wakeAsking = false;
+async function updateWakeLock() {
+  const s = st.status;
+  const want = notifyOn() && st.connected && !!s && document.visibilityState === 'visible'
+    && (s.phase === PHASE.BAT_RUN || s.phase === PHASE.BAT_COUNTDOWN);
+  if (want && !wakeLock && !wakeAsking && 'wakeLock' in navigator) {
+    wakeAsking = true;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch { wakeLock = null; }   // 電池の節約モードなどで断られることがある
+    wakeAsking = false;
+  } else if (!want && wakeLock) {
+    const l = wakeLock; wakeLock = null;
+    try { await l.release(); } catch { /* もう外れている */ }
+  }
+}
+// 別のアプリから戻ると画面をつけたままにする設定が外れているので、もう一度頼む
+document.addEventListener('visibilitychange', () => { updateWakeLock(); });
 
 // ===== 画面 =====
 // 画面ごとに骨組みを 1 回だけ作り、値は data-k の要素だけ書き換える(押している途中のボタンを作り直さない)
@@ -376,7 +432,7 @@ const SCREENS = {
   batSetup() {
     if (local === 'cells') return cellsHtml();
     if (local && local.startsWith('cr:')) return cellRecsHtml(+local.slice(3));
-    // 3.00V の次の 7 番が満充電(2A で入れて -6mV か 3.45V で止める)、8 番が満充電(1本、片側ダミー電池)
+    // 3.00V の次の 7 番が満充電(2A で入れてピークか、始めの上がり方で決めた上限で止める)、8 番が満充電(1本、片側ダミー電池)
     const chips = PRESETS.map((v, k) => `<button class="chip act" data-cmd="bat.preset" data-arg="${k}" data-preset="${k}">${v.toFixed(2)}</button>`).join('')
       + `<button class="chip act" data-cmd="bat.preset" data-arg="${PRESETS.length}" data-full="1">満充電</button>`
       + `<button class="chip act" data-cmd="bat.preset" data-arg="${PRESETS.length + 1}" data-cell="1">1本</button>`;
@@ -385,12 +441,14 @@ const SCREENS = {
       <p class="note">電池の電圧(目標は下のボタンで選びます)</p>
       <div class="chips">${chips}</div>
       <p class="note" data-k="cellNote" hidden>片側にダミー電池を入れて、電池を 1本つないでください。つなぐと番号を聞きます。</p>
+      <p class="note warn" data-k="packNote" hidden>2本は片方の満タンを見のがしがちです。1本ずつなら「1本」が確実です。</p>
       <div data-k="countdownBox" hidden>
         <p class="say" data-k="countdown"></p>
         <button class="btn sub act" data-cmd="bat.cancel">キャンセル</button>
       </div>
       <button class="row act" data-act="buz"><span>ブザー</span><span data-k="buz"></span></button>
       <button class="row act" data-act="race"><span>レース用(早く完了)</span><span data-k="race"></span></button>
+      <button class="row act" data-act="notify"><span>終わりの知らせ(振動・通知)</span><span data-k="notify"></span></button>
       <button class="row act" data-act="cells"><span>電池の記録・ペア</span><span>›</span></button>
       <div class="bottom pair">
         <button class="btn sub act" data-cmd="app" data-arg="0">メニューへ</button>
@@ -913,6 +971,8 @@ function render() {
     if (cellChip) cellChip.classList.toggle('on', !!s.cell);
     const cellNote = view.querySelector('[data-k="cellNote"]');
     if (cellNote) cellNote.hidden = !s.cell;
+    const packNote = view.querySelector('[data-k="packNote"]');
+    if (packNote) packNote.hidden = !(s.full && !s.cell);   // 本体の待機画面と同じ警告
     const box = view.querySelector('[data-k="countdownBox"]');
     if (box) box.hidden = s.phase !== PHASE.BAT_COUNTDOWN;   // 記録・ペアの画面では無い
     setK('countdown', `あと ${s.detect_s} 秒で充電を始めます`);
@@ -967,6 +1027,9 @@ let wasConnected = false;
 store.onChange = () => {
   if (st.connected !== wasConnected) { wasConnected = st.connected; delFetchedFor = ''; refSentFor = {}; }   // つなぎ直したら受け取り直す
   render();
+  const ev = chargeEvent(chargeWatch, st.status);
+  if (ev) fireNotice(ev);
+  updateWakeLock();
   labUploadIfRequested(st.status);
   syncDeleted(st.status);
 };
@@ -1003,6 +1066,7 @@ function renderStage2(scr, s) {
   if (scr === 'batSetup') {
     setK('buz', s.buz ? 'ON' : 'OFF');
     setK('race', s.race ? 'ON' : 'OFF');
+    setK('notify', notifyLabel());
   }
   if (scr === 'batRun') view.querySelector('[data-k="bdoneBox"]').hidden = !s.bdone;
   if (scr === 'run') {
@@ -1119,6 +1183,7 @@ view.addEventListener('click', async (e) => {
     }
     case 'buz': send('bat.buzzer', s?.buz ? 0 : 1); break;
     case 'race': send('bat.race', s?.race ? 0 : 1); break;
+    case 'notify': toggleNotify(); break;
     case 'skip':
       if (s?.label === '冷却中') { if (await ask('冷却を飛ばしますか?\n本体の案内が出たら、それに従ってください。', '飛ばす')) send('skip'); }
       else if (await ask('休憩を飛ばして次のステップへ進みますか?\nモーターが回ることがあります。', '飛ばす')) send('skip');

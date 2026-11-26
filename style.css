@@ -33,6 +33,7 @@ main.off .act { opacity: .4; pointer-events: none; }
 .state.err { background: #4a1a18; color: #ffb0a8; }
 .h { font-size: 20px; font-weight: 800; margin: 4px 0 0; }
 .note { font-size: 13px; color: var(--sub); margin: 0; }
+.note.warn { color: var(--warn); }
 .big { font-size: 44px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .big small { font-size: 16px; font-weight: 600; color: var(--sub); margin-left: 4px; }
 .say { font-size: 26px; font-weight: 800; line-height: 1.35; margin: 12px 0; overflow-wrap: anywhere; }
