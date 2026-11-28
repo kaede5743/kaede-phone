@@ -1,6 +1,7 @@
 // ===== バッテリーラボへの送信(満充電(1本)の記録。本体から bat.cells → bat.cellrecs N で集めて、まとめて送る) =====
 // 受け口 race_manager addBatteryLabRecords。送信キーはモーターラボと同じもの
 export const BATLAB_URL = 'https://asia-northeast1-kaede-race-maneger.cloudfunctions.net/addBatteryLabRecords';
+export const BATLAB_YEARS_URL = 'https://asia-northeast1-kaede-race-maneger.cloudfunctions.net/listBatteryLabYears';
 export const BATLAB_POST_MAX = 200;   // 受け口が 1 回に受け取る数
 
 const DT_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -31,4 +32,13 @@ export function batLabToast(added, moved) {
   if (added > 0) return `バッテリーラボに ${added} 件送りました`;
   if (moved > 0) return `バッテリーラボの番号を ${moved} 件付け替えました`;
   return '';
+}
+
+// 本体の一覧にある番号ごとに cell.year の文字 "<番号>|<年>"(年なしは "<番号>|-")
+export function yearCommands(nos, years) {
+  const y = years && typeof years === 'object' ? years : {};
+  return (Array.isArray(nos) ? nos : []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 99).map((n) => {
+    const v = y[String(n)];
+    return Number.isInteger(v) && v >= 0 && v <= 99 ? `${n}|${v}` : `${n}|-`;
+  });
 }
