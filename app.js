@@ -1,5 +1,6 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
 import { createChargeWatch, chargeEvent } from './notify.js';
+import { BATLAB_URL, batLabBodies, batLabToast } from './batlab.js';
 import { LineBuffer, createStore, screenFor, buildCommand, textArgOk, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
 import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, refCommandText, canResend, queueLabBody, labCodeOf, backfillToast, clockText } from './select.js';
 
@@ -410,6 +411,71 @@ async function syncDeleted(s) {
   }
 }
 
+// ===== バッテリーラボへ送る(満充電(1本)の記録を本体から集めて、受け口にまとめて送る) =====
+// 電池の待機中・結果の画面で、つないで最初の 1回と、結果の画面に入ったときに送る。
+// 記録の一覧の画面を開いている間は、画面の記録と取り合うので待つ(閉じたら送る)
+const BAT_SYNC_PHASES = [PHASE.BAT_READY, PHASE.BAT_RESULT];
+let batSyncedConn = false;   // このつなぎで送ったか(つなぎ直したら戻す)
+let batWantSync = false;
+let batSyncBusy = false;
+let batPrevPhase = -1;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function waitUntil(fn, ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (fn()) return true; await sleep(100); }
+  return false;
+}
+function batSyncOk() {
+  return st.connected && !st.stale && BAT_SYNC_PHASES.includes(st.status?.phase) && !(local === 'cells' || (local && local.startsWith('cr:')));
+}
+function batLabCheck(s) {
+  if (!s) return;
+  const ph = s.phase;
+  if (st.connected && !batSyncedConn && BAT_SYNC_PHASES.includes(ph)) batWantSync = true;
+  if (ph === PHASE.BAT_RESULT && batPrevPhase !== PHASE.BAT_RESULT && batPrevPhase !== -1) batWantSync = true;
+  batPrevPhase = ph;
+  if (batWantSync && !batSyncBusy && batSyncOk()) syncBatLab();
+}
+async function syncBatLab() {
+  const key = labKey();
+  batWantSync = false;
+  batSyncedConn = true;
+  if (!key) return;
+  batSyncBusy = true;
+  let ok = false;
+  try {
+    await sleep(1000);   // 結果の画面に入った直後は本体が記録を書いている
+    if (!batSyncOk()) return;
+    st.cells.complete = false; st.cells.rows = [];
+    send('bat.cells', undefined, true);
+    if (!await waitUntil(() => st.cells.complete || !batSyncOk(), 8000) || !batSyncOk()) return;
+    const nos = st.cells.rows.map((r) => r.no).filter((n) => Number.isInteger(n));
+    const rows = [];
+    for (const no of nos) {
+      st.cellRecs.complete = false; st.cellRecs.rows = [];
+      send('bat.cellrecs', no, true);
+      if (!await waitUntil(() => st.cellRecs.complete || !batSyncOk(), 8000) || !batSyncOk()) return;
+      rows.push(...st.cellRecs.rows);
+    }
+    let added = 0, moved = 0;
+    for (const body of batLabBodies(key, rows)) {
+      if (DEMO) { added += body.recs.length; continue; }
+      const res = await fetch(BATLAB_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!res.ok) { if (res.status === 403) toast('バッテリーラボ: 送信キーが違います'); return; }
+      const j = await res.json();
+      added += j.added || 0; moved += j.moved || 0;
+    }
+    ok = true;
+    const text = batLabToast(added, moved);
+    if (text) toast(text);
+  } catch (e) {
+    console.warn('バッテリーラボへ送れませんでした', e);
+  } finally {
+    batSyncBusy = false;
+    if (!ok && st.connected) { batWantSync = true; batSyncedConn = false; }   // 途中でやめた回は、次に送れるときに送り直す
+  }
+}
+
 const ownerField = () => `<label class="row"><span>所有者</span><input class="act" data-f="owner" list="ownerList" autocomplete="off" aria-label="所有者の名前"></label>
       <datalist id="ownerList">${loadOwners().map((o) => `<option value="${esc(o)}"></option>`).join('')}</datalist>`;
 let shown = '';
@@ -761,7 +827,7 @@ function cellsBodyHtml() {
   // 値は 25℃に直した直近5回の最小(本体の一覧と同じ)。傾きは記録から求めるまで仮の値
   const r0 = c.rows[0] || {};
   const sl = typeof r0.sl === 'number' ? `${num(r0.sl, 1)} mΩ/℃${r0.sln ? '' : '(仮)'}` : '';
-  h += `<p class="note">内部抵抗は 25℃に直した直近5回の最小${sl ? `(直し ${sl})` : ''}。電池を押すと、その電池の記録(番号を変える・消す)を開きます。</p><div class="grid">`;
+  h += `<p class="note">内部抵抗は 25℃に直した直近5回の最小(ピークで止まった回だけ)${sl ? `(直し ${sl})` : ''}。電池を押すと、その電池の記録(番号を変える・消す)を開きます。</p><div class="grid">`;
   for (const r of c.rows) {
     h += `<button class="cell act" data-cellno="${r.no}"><b>No.${r.no}</b><span>${typeof r.ir === 'number' ? `${num(r.ir, 1)} mΩ` : '—'} ・ ${r.cnt}回</span></button>`;
   }
@@ -790,7 +856,7 @@ function cellRecsBodyHtml() {
     const ir = typeof r.ir === 'number' ? `${num(r.ir, 1)} mΩ` : '—';
     // 温度のある記録: その回の温度と 25℃に直した値(25±10℃ の外は比べない)
     let tc = '';
-    if (typeof r.tc === 'number') tc = `<span> ・ ${num(r.tc, 1)} ℃` + (typeof r.ir25 === 'number' ? ` → 25℃で ${num(r.ir25, 1)} mΩ` : '(25±10℃の外で比べない)') + '</span>';
+    if (typeof r.tc === 'number') tc = `<span> ・ ${num(r.tc, 1)} ℃` + (typeof r.ir25 === 'number' ? ` → 25℃で ${num(r.ir25, 1)} mΩ${r.why === 'PEAK' ? '' : '(ピーク以外で止まったので比べない)'}` : '(25±10℃の外で比べない)') + '</span>';
     h += `<div class="cell recRow">
       <b>${shortDt(r.dt)}</b><span>${ir} ・ ${num(r.mah)} mAh ・ ${esc(REASON_TEXT[r.why] || String(r.why || ''))}</span>${tc}
       <div class="row"><span>番号</span><span class="tgt">
@@ -1036,13 +1102,14 @@ function render() {
 }
 let wasConnected = false;
 store.onChange = () => {
-  if (st.connected !== wasConnected) { wasConnected = st.connected; delFetchedFor = ''; refSentFor = {}; }   // つなぎ直したら受け取り直す
+  if (st.connected !== wasConnected) { wasConnected = st.connected; delFetchedFor = ''; refSentFor = {}; batSyncedConn = false; batPrevPhase = -1; }   // つなぎ直したら受け取り直す
   render();
   const ev = chargeEvent(chargeWatch, st.status);
   if (ev) fireNotice(ev);
   updateWakeLock();
   labUploadIfRequested(st.status);
   syncDeleted(st.status);
+  batLabCheck(st.status);
 };
 
 // スピードマネージャーの値。速度はページで計算する(本体の画面と同じ式)

@@ -1,6 +1,6 @@
 // 同じ場所のファイルを入れておき、電波がなくても開けるようにする。ページを直したら CACHE の番号を上げる
-const CACHE = 'kaede-phone-v26';
-const FILES = ['./', 'index.html', 'app.js', 'proto.js', 'select.js', 'notify.js', 'style.css', 'manifest.json', 'icon.svg'];
+const CACHE = 'kaede-phone-v27';
+const FILES = ['./', 'index.html', 'app.js', 'proto.js', 'select.js', 'notify.js', 'batlab.js', 'style.css', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
   // ブラウザの一時保存(GitHub Pages は 10 分)を通さずに取る。通すと直したばかりのページの代わりに古いものが入る
