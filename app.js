@@ -462,7 +462,7 @@ const SCREENS = {
         <div class="cell"><b data-k="i"></b><span>電流 A</span></div>
         <div class="cell"><b data-k="mah"></b><span>充電量 mAh</span></div>
         <div class="cell"><b data-k="elapsed"></b><span>経過</span></div>
-        <div class="cell"><b data-k="temp"></b><span>温度 ℃</span></div>
+        <div class="cell"><b data-k="temp"></b><span>本体 / 電池 ℃</span></div>
       </div>
       <p class="note">目標 <span data-k="preset"></span></p>
       <div class="grid" data-k="fcBox" hidden>
@@ -758,7 +758,10 @@ function cellsBodyHtml() {
   } else if (p.complete) {
     h += '<p class="note">記録が足りません(2回以上の電池が 2本必要)</p>';
   }
-  h += '<p class="note">電池を押すと、その電池の記録(番号を変える・消す)を開きます。</p><div class="grid">';
+  // 値は 25℃に直した直近5回の最小(本体の一覧と同じ)。傾きは記録から求めるまで仮の値
+  const r0 = c.rows[0] || {};
+  const sl = typeof r0.sl === 'number' ? `${num(r0.sl, 1)} mΩ/℃${r0.sln ? '' : '(仮)'}` : '';
+  h += `<p class="note">内部抵抗は 25℃に直した直近5回の最小${sl ? `(直し ${sl})` : ''}。電池を押すと、その電池の記録(番号を変える・消す)を開きます。</p><div class="grid">`;
   for (const r of c.rows) {
     h += `<button class="cell act" data-cellno="${r.no}"><b>No.${r.no}</b><span>${typeof r.ir === 'number' ? `${num(r.ir, 1)} mΩ` : '—'} ・ ${r.cnt}回</span></button>`;
   }
@@ -785,8 +788,11 @@ function cellRecsBodyHtml() {
   let h = '<p class="note">新しい順。番号を入れて「変える」で別の電池の記録にします。消した記録は元に戻せません。</p>';
   for (const r of c.rows) {
     const ir = typeof r.ir === 'number' ? `${num(r.ir, 1)} mΩ` : '—';
+    // 温度のある記録: その回の温度と 25℃に直した値(25±10℃ の外は比べない)
+    let tc = '';
+    if (typeof r.tc === 'number') tc = `<span> ・ ${num(r.tc, 1)} ℃` + (typeof r.ir25 === 'number' ? ` → 25℃で ${num(r.ir25, 1)} mΩ` : '(25±10℃の外で比べない)') + '</span>';
     h += `<div class="cell recRow">
-      <b>${shortDt(r.dt)}</b><span>${ir} ・ ${num(r.mah)} mAh ・ ${esc(REASON_TEXT[r.why] || String(r.why || ''))}</span>
+      <b>${shortDt(r.dt)}</b><span>${ir} ・ ${num(r.mah)} mAh ・ ${esc(REASON_TEXT[r.why] || String(r.why || ''))}</span>${tc}
       <div class="row"><span>番号</span><span class="tgt">
         <input class="act" inputmode="numeric" data-renum="${r.k}" value="${r.no}" aria-label="新しい番号">
         <button class="chip act" data-act="recRenum" data-k="${r.k}" data-dt="${esc(r.dt)}">変える</button>
@@ -929,12 +935,14 @@ function render() {
   setK('label', s.label || '');
   setK('v', num(s.v, 3));
   setK('i', num(s.i, 2));
-  setK('temp', num(s.temp, 1));
+  // 本体 = PPS 自身の温度、電池 = NCIR Unit(読めないときは —)
+  setK('temp', `${num(s.temp, 0)} / ${typeof s.btemp === 'number' ? num(s.btemp, 1) : '—'}`);
   setK('mah', num(s.mah));
   setK('preset', s.cell ? '満充電(1本)' : (s.full ? '満充電' : `${num(s.preset, 2)} V`));
   // 満充電(1本): 番号と内部抵抗、結果では相性のよい相手
   if (s.cell && s.cell_no) {
-    setK('cellInfo', `No.${s.cell_no}` + (typeof s.cell_ir === 'number' ? `  内部抵抗 ${num(s.cell_ir, 1)} mΩ` : ''));
+    setK('cellInfo', `No.${s.cell_no}` + (typeof s.cell_ir === 'number' ? `  内部抵抗 ${num(s.cell_ir, 1)} mΩ` : '')
+      + (typeof s.cell_ir === 'number' && typeof s.cell_temp === 'number' ? `(${num(s.cell_temp, 1)} ℃)` : ''));
   } else if (s.cell && s.cell_no === 0 && (s.phase === PHASE.BAT_RUN || s.phase === PHASE.BAT_RESULT)) {
     setK('cellInfo', '番号なし(測らず・記録せず)');
   } else {
@@ -1300,7 +1308,7 @@ const demo = {
   meas: { owner: 'かえで', saved: 0, up: 0, req: 0 },
   cell: 0,   // 見本で満充電(1本)を選んでいるか
   status(phase) {
-    const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, target: 0, elapsed_s: 0, max_s: 0, rpm: null, live: null,
+    const base = { t: 's', phase, label: '', prompt: '', v: 0, i: 0, temp: 28.5, btemp: 24.3, cell_temp: null, target: 0, elapsed_s: 0, max_s: 0, rpm: null, live: null,
       checks: 0, checks_max: 0, mah: 0, preset: 2.8, detect_s: 0, error: '', next_unit: 12,
       run: 0, mset: 30, skip: 0, sel_no: 0, note: '', buz: 1, race: 0, bdone: 0, full: 0,
       cell: demo.cell, cell_no: 7, cell_ir: null, partner: 0, partner_d: null,
@@ -1327,7 +1335,7 @@ const demo = {
       27: { phase: 23, label: 'READY', v: 1.32, cell: 1 },
       28: { phase: 3, label: 'FULL', v: 1.62, i: 2.0, mah: 120, elapsed_s: 240, cell: 1, cell_ir: 42.5,
         fc_peak: 1.8352, fc_drop: 1.4, fc_dmv: 3, fc_vmax: 1.86 },
-      29: { phase: 4, label: 'RESULT', mah: 310, elapsed_s: 560, cell: 1, cell_ir: 42.5, partner: 3, partner_d: 2,
+      29: { phase: 4, label: 'RESULT', mah: 310, elapsed_s: 560, cell: 1, cell_ir: 42.5, cell_temp: 31.2, partner: 3, partner_d: 2,
         cell_del: 0, cell_k: 12, cell_dt: '2026-11-25 19:30:12' },
     };
     return JSON.stringify({ ...base, ...set[phase] });
@@ -1349,13 +1357,13 @@ const demo = {
     rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'u', i, n: rows.length, ...r })));
   },
   cells() {
-    const rows = [{ no: 1, ir: 40.2, cnt: 3, mah: 305 }, { no: 2, ir: 55.0, cnt: 2, mah: 290 },
-      { no: 3, ir: 42.1, cnt: 4, mah: 312 }, { no: 7, ir: 42.5, cnt: 1, mah: 310 }];
+    const rows = [{ no: 1, ir: 40.2, cnt: 3, mah: 305, sl: 0.5, sln: 0 }, { no: 2, ir: 55.0, cnt: 2, mah: 290, sl: 0.5, sln: 0 },
+      { no: 3, ir: 42.1, cnt: 4, mah: 312, sl: 0.5, sln: 0 }, { no: 7, ir: 42.5, cnt: 1, mah: 310, sl: 0.5, sln: 0 }];
     rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'cr', i, n: rows.length, ...r })));
     store.apply(JSON.stringify({ t: 'cp', i: 0, n: 1, a: 1, b: 3, d: 1.9 }));
   },
   cellRecs(no) {
-    const rows = [{ k: 12, dt: '2026-11-25 19:30:12', no, ir: 42.5, why: 'PEAK', mah: 98 },
+    const rows = [{ k: 12, dt: '2026-11-25 19:30:12', no, ir: 42.5, why: 'PEAK', mah: 98, tc: 31.2, ir25: 45.6 },
       { k: 7, dt: '2026-11-24 21:05:40', no, ir: 44.1, why: 'FLAT', mah: 60 },
       { k: 2, dt: '2026-11-24 12:10:03', no, ir: null, why: 'VMAX', mah: 18 }];
     rows.forEach((r, i) => store.apply(JSON.stringify({ t: 'ce', i, n: rows.length, ...r })));
