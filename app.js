@@ -827,7 +827,7 @@ function cellsBodyHtml() {
   // 値は 25℃に直した直近5回の最小(本体の一覧と同じ)。傾きは記録から求めるまで仮の値
   const r0 = c.rows[0] || {};
   const sl = typeof r0.sl === 'number' ? `${num(r0.sl, 1)} mΩ/℃${r0.sln ? '' : '(仮)'}` : '';
-  h += `<p class="note">内部抵抗は 25℃に直した直近5回の最小${sl ? `(直し ${sl})` : ''}。電池を押すと、その電池の記録(番号を変える・消す)を開きます。</p><div class="grid">`;
+  h += `<p class="note">内部抵抗は 25℃に直した直近5回の最小(ピークで止まった回だけ)${sl ? `(直し ${sl})` : ''}。電池を押すと、その電池の記録(番号を変える・消す)を開きます。</p><div class="grid">`;
   for (const r of c.rows) {
     h += `<button class="cell act" data-cellno="${r.no}"><b>No.${r.no}</b><span>${typeof r.ir === 'number' ? `${num(r.ir, 1)} mΩ` : '—'} ・ ${r.cnt}回</span></button>`;
   }
@@ -856,7 +856,7 @@ function cellRecsBodyHtml() {
     const ir = typeof r.ir === 'number' ? `${num(r.ir, 1)} mΩ` : '—';
     // 温度のある記録: その回の温度と 25℃に直した値(25±10℃ の外は比べない)
     let tc = '';
-    if (typeof r.tc === 'number') tc = `<span> ・ ${num(r.tc, 1)} ℃` + (typeof r.ir25 === 'number' ? ` → 25℃で ${num(r.ir25, 1)} mΩ` : '(25±10℃の外で比べない)') + '</span>';
+    if (typeof r.tc === 'number') tc = `<span> ・ ${num(r.tc, 1)} ℃` + (typeof r.ir25 === 'number' ? ` → 25℃で ${num(r.ir25, 1)} mΩ${r.why === 'PEAK' ? '' : '(ピーク以外で止まったので比べない)'}` : '(25±10℃の外で比べない)') + '</span>';
     h += `<div class="cell recRow">
       <b>${shortDt(r.dt)}</b><span>${ir} ・ ${num(r.mah)} mAh ・ ${esc(REASON_TEXT[r.why] || String(r.why || ''))}</span>${tc}
       <div class="row"><span>番号</span><span class="tgt">
