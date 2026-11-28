@@ -411,7 +411,7 @@ async function syncDeleted(s) {
   }
 }
 
-// ===== 電池ラボへ送る(満充電(1本)の記録を本体から集めて、受け口にまとめて送る) =====
+// ===== バッテリーラボへ送る(満充電(1本)の記録を本体から集めて、受け口にまとめて送る) =====
 // 電池の待機中・結果の画面で、つないで最初の 1回と、結果の画面に入ったときに送る。
 // 記録の一覧の画面を開いている間は、画面の記録と取り合うので待つ(閉じたら送る)
 const BAT_SYNC_PHASES = [PHASE.BAT_READY, PHASE.BAT_RESULT];
@@ -461,7 +461,7 @@ async function syncBatLab() {
     for (const body of batLabBodies(key, rows)) {
       if (DEMO) { added += body.recs.length; continue; }
       const res = await fetch(BATLAB_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) { if (res.status === 403) toast('電池ラボ: 送信キーが違います'); return; }
+      if (!res.ok) { if (res.status === 403) toast('バッテリーラボ: 送信キーが違います'); return; }
       const j = await res.json();
       added += j.added || 0; moved += j.moved || 0;
     }
@@ -469,7 +469,7 @@ async function syncBatLab() {
     const text = batLabToast(added, moved);
     if (text) toast(text);
   } catch (e) {
-    console.warn('電池ラボへ送れませんでした', e);
+    console.warn('バッテリーラボへ送れませんでした', e);
   } finally {
     batSyncBusy = false;
     if (!ok && st.connected) { batWantSync = true; batSyncedConn = false; }   // 途中でやめた回は、次に送れるときに送り直す

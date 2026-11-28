@@ -1,4 +1,4 @@
-// ===== 電池ラボへの送信(満充電(1本)の記録。本体から bat.cells → bat.cellrecs N で集めて、まとめて送る) =====
+// ===== バッテリーラボへの送信(満充電(1本)の記録。本体から bat.cells → bat.cellrecs N で集めて、まとめて送る) =====
 // 受け口 race_manager addBatteryLabRecords。送信キーはモーターラボと同じもの
 export const BATLAB_URL = 'https://asia-northeast1-kaede-race-maneger.cloudfunctions.net/addBatteryLabRecords';
 export const BATLAB_POST_MAX = 200;   // 受け口が 1 回に受け取る数
@@ -27,8 +27,8 @@ export function batLabBodies(key, rows) {
 
 // 送ったあとのトースト。増えも番号の付け替えも無ければ出さない
 export function batLabToast(added, moved) {
-  if (added > 0 && moved > 0) return `電池ラボに ${added} 件送りました(番号の付け替え ${moved} 件)`;
-  if (added > 0) return `電池ラボに ${added} 件送りました`;
-  if (moved > 0) return `電池ラボの番号を ${moved} 件付け替えました`;
+  if (added > 0 && moved > 0) return `バッテリーラボに ${added} 件送りました(番号の付け替え ${moved} 件)`;
+  if (added > 0) return `バッテリーラボに ${added} 件送りました`;
+  if (moved > 0) return `バッテリーラボの番号を ${moved} 件付け替えました`;
   return '';
 }

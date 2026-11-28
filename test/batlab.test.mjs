@@ -32,7 +32,7 @@ test('batLabBodies: 上限ごとに分ける。送るものが無ければ空', 
 
 test('batLabToast: 増えた・付け替えたときだけ出す', () => {
   assert.equal(batLabToast(0, 0), '');
-  assert.equal(batLabToast(3, 0), '電池ラボに 3 件送りました');
-  assert.equal(batLabToast(0, 2), '電池ラボの番号を 2 件付け替えました');
-  assert.equal(batLabToast(1, 1), '電池ラボに 1 件送りました(番号の付け替え 1 件)');
+  assert.equal(batLabToast(3, 0), 'バッテリーラボに 3 件送りました');
+  assert.equal(batLabToast(0, 2), 'バッテリーラボの番号を 2 件付け替えました');
+  assert.equal(batLabToast(1, 1), 'バッテリーラボに 1 件送りました(番号の付け替え 1 件)');
 });
