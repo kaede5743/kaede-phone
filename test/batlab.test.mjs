@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batLabRec, batLabBodies, batLabToast, BATLAB_POST_MAX } from '../batlab.js';
+import { batLabRec, batLabBodies, batLabToast, yearCommands, BATLAB_POST_MAX } from '../batlab.js';
 
 const row = (o = {}) => ({ k: 3, dt: '2026-11-28 10:20:30', no: 1, ir: 117.6, why: 'PEAK', mah: 54, tc: 29.9, ir25: 120.1, ...o });
 
@@ -35,4 +35,11 @@ test('batLabToast: 増えた・付け替えたときだけ出す', () => {
   assert.equal(batLabToast(3, 0), 'バッテリーラボに 3 件送りました');
   assert.equal(batLabToast(0, 2), 'バッテリーラボの番号を 2 件付け替えました');
   assert.equal(batLabToast(1, 1), 'バッテリーラボに 1 件送りました(番号の付け替え 1 件)');
+});
+
+test('yearCommands: 番号ごとに年、年なし・不正な年は "-"', () => {
+  assert.deepEqual(yearCommands([1, 2, 3], { 1: 26, 2: 25 }), ['1|26', '2|25', '3|-']);
+  assert.deepEqual(yearCommands([4, 0, 100], { 4: 'x' }), ['4|-']);
+  assert.deepEqual(yearCommands([], {}), []);
+  assert.deepEqual(yearCommands([5], null), ['5|-']);
 });

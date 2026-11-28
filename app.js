@@ -1,6 +1,6 @@
 // KaedeSystem をスマホから操作するページ。本体の状態を映すだけで、操作できるかは本体が決める
 import { createChargeWatch, chargeEvent } from './notify.js';
-import { BATLAB_URL, batLabBodies, batLabToast } from './batlab.js';
+import { BATLAB_URL, BATLAB_YEARS_URL, batLabBodies, batLabToast, yearCommands } from './batlab.js';
 import { LineBuffer, createStore, screenFor, buildCommand, textArgOk, REJECT_TEXT, PHASE, GEARS_X10, TIRE_X10_MIN, TIRE_X10_MAX, speedKmh } from './proto.js';
 import { esc, num, unitListHtml, unitDetailHtml, measResultHtml, measDetailHtml, measLabBody, refCommandText, canResend, queueLabBody, labCodeOf, backfillToast, clockText } from './select.js';
 
@@ -468,6 +468,15 @@ async function syncBatLab() {
     ok = true;
     const text = batLabToast(added, moved);
     if (text) toast(text);
+    // 番号ごとの生産年(バッテリーラボのメモの先頭「26-」など)を本体へ。本体は同じ年どうしだけでペアを組む
+    let years = {};
+    if (!DEMO) {
+      const yr = await fetch(BATLAB_YEARS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+      if (!yr.ok) return;
+      years = (await yr.json()).years || {};
+    }
+    if (!batSyncOk()) return;
+    for (const t of yearCommands(nos, years)) send('cell.year', t, true);
   } catch (e) {
     console.warn('バッテリーラボへ送れませんでした', e);
   } finally {
@@ -822,7 +831,7 @@ function cellsBodyHtml() {
     h += `<p class="say">おすすめ No.${b.a} と No.${b.b}(差 ${num(b.d, 0)} mΩ)</p>`;
     for (const r of p.rows.slice(1, 3)) h += `<p class="note">No.${r.a} と No.${r.b}(差 ${num(r.d, 0)} mΩ)</p>`;
   } else if (p.complete) {
-    h += '<p class="note">記録が足りません(2回以上の電池が 2本必要)</p>';
+    h += '<p class="note">ペアなし(同じ生産年で 2回以上の電池が 2本必要。年はバッテリーラボのメモの先頭「26-」など)</p>';
   }
   // 値は 25℃に直した直近5回の最小(本体の一覧と同じ)。傾きは記録から求めるまで仮の値
   const r0 = c.rows[0] || {};
